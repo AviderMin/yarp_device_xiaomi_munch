@@ -37,12 +37,12 @@ TARGET_KERNEL_ARCH := arm64
 TARGET_KERNEL_HEADER_ARCH := $(TARGET_KERNEL_ARCH)
 BOARD_KERNEL_IMAGE_NAME := Image.gz-dtb
 TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/Image.gz-dtb
-BOARD_BOOTIMG_HEADER_VERSION := 3
+BOARD_BOOT_HEADER_VERSION := 3
 
 BOARD_KERNEL_CMDLINE := None
 # TARGET_KERNEL_SOURCE := kernel/xiaomi/munch
 # TARGET_KERNEL_CONFIG := munch_defconfig
-BOARD_MKBOOTIMG_ARGS += --header_version $(BOARD_BOOTIMG_HEADER_VERSION)
+BOARD_MKBOOTIMG_ARGS += --header_version $(BOARD_BOOT_HEADER_VERSION)
 
 # AVB
 BOARD_AVB_ENABLE := true
@@ -65,6 +65,7 @@ BOARD_QTI_DYNAMIC_PARTITIONS_PARTITION_LIST := system system_ext product vendor 
 # Recovery
 TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
 TARGET_USES_MKE2FS := true
+BOARD_RECOVERYIMAGE_PARTITION_SIZE := 201326592
 
 # System as root
 BOARD_ROOT_EXTRA_FOLDERS := bluetooth dsp firmware persist
@@ -75,8 +76,8 @@ TW_THEME := portrait_hdpi
 RECOVERY_SDCARD_ON_DATA := true
 TARGET_RECOVERY_QCOM_RTC_FIX := true
 TW_DEFAULT_BRIGHTNESS := 500
-TW_DEVICE_VERSION := -hraj9258
-TW_EXCLUDE_TWRPAPP := true
+TW_MAX_BRIGHTNESS := 2047
+TW_DEVICE_VERSION := hraj9258
 TW_EXTRA_LANGUAGES := true
 TW_SCREEN_BLANK_ON_BOOT := true
 TW_INPUT_BLACKLIST := "hbtp_vm"
@@ -84,13 +85,17 @@ TW_USE_TOOLBOX := true
 TW_INCLUDE_NTFS_3G := true
 TW_INCLUDE_REPACKTOOLS := true
 TW_INCLUDE_RESETPROP := true
+TW_INCLUDE_FASTBOOTD := true
+TW_HAS_EDL_MODE := true
+# fscrypt policy: Android 13 firmware uses fscrypt policy v2. TWRP 16.0's
+# bootable/recovery/libtar/libtar_defaults.go picks v1 only when this is exactly
+# "1"; any other value (incl. 2) selects v2, i.e. 2 == default == what we want.
 TW_USE_FSCRYPT_POLICY := 2
 TW_BACKUP_EXCLUSIONS := /data/fonts
 
-
 TW_STATUS_ICONS_ALIGN := center
 TW_CUSTOM_CPU_POS := "50"
-TW_CUSTOM_CLOCK_POS := "340" 
+TW_CUSTOM_CLOCK_POS := "340"
 TW_CUSTOM_BATTERY_POS := "800"
 
 # TWRP Debug Flags

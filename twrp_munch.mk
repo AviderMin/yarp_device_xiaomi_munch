@@ -23,6 +23,6 @@ $(call inherit-product, vendor/twrp/config/common.mk)
 # Device identifier. This must come after all inclusions
 PRODUCT_DEVICE := munch
 PRODUCT_NAME := twrp_munch
-PRODUCT_BRAND := POCO
-PRODUCT_MODEL := POCO F4
+PRODUCT_BRAND := Redmi
+PRODUCT_MODEL := 22021211RC
 PRODUCT_MANUFACTURER := xiaomi

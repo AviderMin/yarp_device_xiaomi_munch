@@ -25,9 +25,6 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-# Qcom TWRP Default Decryption
-import /init.recovery.qcom_decrypt.rc
-
 on init
     write /sys/class/backlight/panel0-backlight/brightness 200
 

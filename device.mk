@@ -8,7 +8,6 @@
 LOCAL_PATH := device/xiaomi/munch
 
 # API
-PRODUCT_TARGET_VNDK_VERSION := 30
 PRODUCT_SHIPPING_API_LEVEL := 31
 
 # Dynamic partitions
@@ -38,20 +37,11 @@ AB_OTA_POSTINSTALL_CONFIG += \
     FILESYSTEM_TYPE_system=ext4 \
     POSTINSTALL_OPTIONAL_system=true
 
-# Boot control HAL
+# Boot control HAL (AIDL/HIDL boot control services come from
+# bootable/recovery in TWRP 16.0, which also builds the *.recovery variants)
 PRODUCT_PACKAGES += \
     android.hardware.boot@1.1-impl \
-    android.hardware.boot@1.1-service \
-    bootctrl.kona \
-    bootctrl.kona.recovery
-
-# PRODUCT_PACKAGES += \
-
-# PRODUCT_STATIC_BOOT_CONTROL_HAL := \
-#     bootctrl.kona \
-#     libgptutils \
-#     libz \
-#     libcutils
+    android.hardware.boot@1.1-service
 
 PRODUCT_PACKAGES += \
     otapreopt_script \
@@ -60,49 +50,36 @@ PRODUCT_PACKAGES += \
     update_verifier \
     update_engine_sideload
 
-# Qcom decryption
-PRODUCT_PACKAGES += \
-    qcom_decrypt \
-    qcom_decrypt_fbe
-
 # fastbootd
 PRODUCT_PACKAGES += \
-    android.hardware.fastboot@1.0-impl-mock \
-	android.hardware.fastboot@1.0-impl-mock.recovery \
-    fastbootd
+    fastbootd \
+    android.hardware.fastboot@1.0-impl-mock
 
-# Soong Namespaces : Qcom commonsys Display
-PRODUCT_SOONG_NAMESPACES += \
-    vendor/qcom/opensource/commonsys-intf/display
 
 # Recovery libs
 TARGET_RECOVERY_DEVICE_MODULES += \
-    libion \
-    vendor.display.config@1.0 \
-    vendor.display.config@2.0
-    # libdisplayconfig.qti
+    libion
 
 RECOVERY_LIBRARY_SOURCE_FILES += \
-    $(TARGET_OUT_SHARED_LIBRARIES)/libion.so \
-    $(TARGET_OUT_SYSTEM_EXT_SHARED_LIBRARIES)/vendor.display.config@1.0.so \
-    $(TARGET_OUT_SYSTEM_EXT_SHARED_LIBRARIES)/vendor.display.config@2.0.so
-    # $(TARGET_OUT_SYSTEM_EXT_SHARED_LIBRARIES)/libdisplayconfig.qti.so
+    $(TARGET_OUT_SHARED_LIBRARIES)/libion.so
 
 # Crypto
 TW_INCLUDE_CRYPTO := true
 TW_INCLUDE_CRYPTO_FBE := true
 TW_INCLUDE_FBE_METADATA_DECRYPT := true
-BOARD_USES_QCOM_FBE_DECRYPTION := true
 BOARD_USES_METADATA_PARTITION := true
 
-# Platform 
+# Platform
+# NOTE: Android 16 rejects PLATFORM_SECURITY_PATCH / PLATFORM_VERSION_LAST_STABLE
+# being set directly (build/make/core/version_util.mk:55 and :113) - they must use
+# the RELEASE_* spelling. PLATFORM_VERSION itself has no such guard.
 PLATFORM_VERSION := 99.87.36
-PLATFORM_SECURITY_PATCH := 2127-12-31
-PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
-VENDOR_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
-BOOT_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
-
+RELEASE_PLATFORM_SECURITY_PATCH := 2127-12-31
+RELEASE_PLATFORM_VERSION_LAST_STABLE := 99.87.36
+VENDOR_SECURITY_PATCH := $(RELEASE_PLATFORM_SECURITY_PATCH)
+BOOT_SECURITY_PATCH := $(RELEASE_PLATFORM_SECURITY_PATCH)
 
 # AIDL Vibrator
 TW_SUPPORT_INPUT_AIDL_HAPTICS := true
 TW_SUPPORT_INPUT_AIDL_HAPTICS_FQNAME := "IVibrator/vibratorfeature"
+
