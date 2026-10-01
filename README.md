@@ -31,7 +31,7 @@ git clone https://github.com/AviderMin/yarp_device_xiaomi_munch.git device/xiaom
 
 export ALLOW_MISSING_DEPENDENCIES=true
 . build/envsetup.sh
-lunch twrp_munch-eng
+lunch twrp_munch
 mka bootimage            # 本设备无 recovery 分区：TWRP 的 recovery 资源被并入 boot.img（recovery-as-boot）
 ```
 
