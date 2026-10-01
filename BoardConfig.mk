@@ -23,7 +23,6 @@ TARGET_2ND_CPU_ABI := armeabi-v7a
 TARGET_2ND_CPU_ABI2 := armeabi
 TARGET_2ND_CPU_VARIANT := generic
 TARGET_BOARD_SUFFIX := _64
-TARGET_USES_64_BIT_BINDER := true
 
 # Assert
 TARGET_OTA_ASSERT_DEVICE := munch
@@ -37,12 +36,18 @@ TARGET_KERNEL_ARCH := arm64
 TARGET_KERNEL_HEADER_ARCH := $(TARGET_KERNEL_ARCH)
 BOARD_KERNEL_IMAGE_NAME := Image.gz-dtb
 TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/Image.gz-dtb
-BOARD_BOOT_HEADER_VERSION := 3
-
-BOARD_KERNEL_CMDLINE := None
+# NOTE: do NOT define BOARD_BOOT_HEADER_VERSION here. Setting it (>= 3) makes AOSP
+# set BUILDING_VENDOR_BOOT_IMAGE := true (build/make/core/board_config.mk:521-531),
+# which moves the kernel cmdline out of boot.img (Makefile:1334-1348) and makes
+# TWRP's twrpfastboot=1 (vendor/twrp/config/BoardConfigTWRP.mk:7) land in no image
+# at all. The boot-image header version is only ever taken from here, because
+# build/make/core/ never mentions header_version itself - it goes straight to
+# mkbootimg via BOARD_MKBOOTIMG_ARGS (Makefile:1299/1398).
+# No device-specific kernel arguments are required here; TWRP appends twrpfastboot=1.
+BOARD_KERNEL_CMDLINE :=
 # TARGET_KERNEL_SOURCE := kernel/xiaomi/munch
 # TARGET_KERNEL_CONFIG := munch_defconfig
-BOARD_MKBOOTIMG_ARGS += --header_version $(BOARD_BOOT_HEADER_VERSION)
+BOARD_MKBOOTIMG_ARGS += --header_version 3
 
 # AVB
 BOARD_AVB_ENABLE := true
@@ -65,7 +70,6 @@ BOARD_QTI_DYNAMIC_PARTITIONS_PARTITION_LIST := system system_ext product vendor 
 # Recovery
 TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
 TARGET_USES_MKE2FS := true
-BOARD_RECOVERYIMAGE_PARTITION_SIZE := 201326592
 
 # System as root
 BOARD_ROOT_EXTRA_FOLDERS := bluetooth dsp firmware persist

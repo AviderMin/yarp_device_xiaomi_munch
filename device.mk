@@ -70,14 +70,15 @@ TW_INCLUDE_FBE_METADATA_DECRYPT := true
 BOARD_USES_METADATA_PARTITION := true
 
 # Platform
-# NOTE: Android 16 rejects PLATFORM_SECURITY_PATCH / PLATFORM_VERSION_LAST_STABLE
-# being set directly (build/make/core/version_util.mk:55 and :113) - they must use
-# the RELEASE_* spelling. PLATFORM_VERSION itself has no such guard.
+# Android 16 owns the security-patch / last-stable values through release flags:
+# RELEASE_PLATFORM_SECURITY_PATCH and RELEASE_PLATFORM_VERSION_LAST_STABLE are
+# .KATI_READONLY build flags (build/release/flag_values/<branch>/*.textproto), and
+# setting PLATFORM_SECURITY_PATCH / PLATFORM_VERSION_LAST_STABLE directly trips
+# the $(error) guards in build/make/core/version_util.mk:55 / :113. The
+# VENDOR_SECURITY_PATCH / BOOT_SECURITY_PATCH pair is derived from
+# PLATFORM_SECURITY_PATCH by the build system. Only PLATFORM_VERSION itself is
+# still overridable from a device tree.
 PLATFORM_VERSION := 99.87.36
-RELEASE_PLATFORM_SECURITY_PATCH := 2127-12-31
-RELEASE_PLATFORM_VERSION_LAST_STABLE := 99.87.36
-VENDOR_SECURITY_PATCH := $(RELEASE_PLATFORM_SECURITY_PATCH)
-BOOT_SECURITY_PATCH := $(RELEASE_PLATFORM_SECURITY_PATCH)
 
 # AIDL Vibrator
 TW_SUPPORT_INPUT_AIDL_HAPTICS := true

@@ -32,11 +32,12 @@ git clone https://github.com/AviderMin/yarp_device_xiaomi_munch.git device/xiaom
 export ALLOW_MISSING_DEPENDENCIES=true
 . build/envsetup.sh
 lunch twrp_munch-eng
-mka recoveryimage        # recovery 资源同时并入 boot 镜像（BOARD_USES_RECOVERY_AS_BOOT := true）
+mka bootimage            # 本设备无 recovery 分区：TWRP 的 recovery 资源被并入 boot.img（recovery-as-boot）
 ```
 
-产物位置：`out/target/product/munch/` 下的 `recovery.img`（同时会生成 `boot.img`；本设备树走
-recovery-as-boot 路线，recovery 资源与 boot 镜像共用同一内核/ramdisk，实际刷入哪个以本机 `out/` 产物为准）。
+产物位置：`out/target/product/munch/boot.img`。本设备**没有 recovery 分区**，`BOARD_USES_RECOVERY_AS_BOOT := true`
+使 `INSTALLED_RECOVERYIMAGE_TARGET` 为空（`build/make/core/Makefile:283-296`），**不会**产出 `recovery.img`；
+TWRP 的 recovery 资源直接打进 boot 镜像，刷机写的是 boot 分区：`fastboot flash boot boot.img`。
 
 ## 目录结构
 
@@ -63,8 +64,9 @@ system.prop
   清单缺失时会回退到 `keymaster_ver` 属性/ramdisk 清单，但保留它仍是解密路径的首选版本判定来源，因此**不要清理**。
 * **stock/ 不入库**：`.gitignore` 忽略的 `stock/` 是本地 HyperOS 官方固件转储（约 9.25 GB），
   仅作为 QTI 二进制/清单的来源素材，不属于交付内容。
-* **recovery 分区**：本设备有独立 192 MB recovery 分区，`BOARD_USES_RECOVERY_AS_BOOT := true`
-  使 TWRP 构建走 boot/recovery 一体路线，`BOARD_BOOT_HEADER_VERSION := 3`。
+* **recovery 在 boot 里**：本设备没有独立 recovery 分区（`device.mk` 的 `AB_OTA_PARTITIONS` 与 `twrp.flags`
+  中都没有 recovery 条目），TWRP 走 recovery-as-boot 路线，recovery 资源并入 `boot.img`；
+  boot header v3 通过 `BOARD_MKBOOTIMG_ARGS += --header_version 3` 传给 `mkbootimg`，刷入目标同样是 boot 分区。
 
 ## 许可
 
