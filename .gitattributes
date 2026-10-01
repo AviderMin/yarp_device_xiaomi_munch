@@ -1,0 +1,11 @@
+# This device tree is edited on Windows and built on Linux (repo + mka).
+# Normalise every text file to LF so a Windows checkout never lands CRLF
+# in the .mk/.rc/.fstab/.flags files that the Linux build consumes.
+* text=auto eol=lf
+
+# Binary payloads must never be converted (belt and braces on top of text=auto).
+*.bin   binary
+*.so    binary
+*.img   binary
+*.apk   binary
+*.gz-dtb binary
