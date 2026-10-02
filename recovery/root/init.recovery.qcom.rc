@@ -39,18 +39,17 @@ on fs
     # Firmware mounts needed by the Qualcomm secure stack below: the keymaster
     # and gatekeeper TrustZone apps (keymaster.mbn etc.) live in the modem
     # partition and QSEECom_start_app() loads them through the kernel firmware
-    # loader, whose search path is set to /vendor/firmware_mnt/image in
-    # ueventd.rc. The recovery fstab already mounts these (first_stage_mount);
-    # without them the TA load fails with "QSEECom_start_app failed" and
-    # metadata decryption can never derive the wrapped key.
-    # Mount the modem partition early: the keymaster/gatekeeper TrustZone apps
-    # (keymaster.mbn etc.) live there and QSEECom_start_app() loads them via the
-    # kernel firmware loader, whose search path includes /vendor/firmware_mnt/image.
+    # loader, whose search path includes /vendor/firmware_mnt/image (see ueventd
+    # firmware search order: /etc/firmware, /odm/firmware, /vendor/firmware,
+    # /firmware/image -- and the QSEECom driver also queries /vendor/firmware_mnt).
     # TWRP's own mount of the recovery.fstab entries happens far too late (after
-    # init has already started the crypto services), so do it here in init.
+    # init has already started the crypto services), so mount here in init.
+    # ueventd creates the by-name links during coldplug which runs concurrently
+    # with 'on fs', so wait for the node before mounting.
+    wait /dev/block/bootdevice/by-name/modem 10
     mkdir /vendor/firmware_mnt 0755 root root
     mount vfat /dev/block/bootdevice/by-name/modem /vendor/firmware_mnt ro shortname=lower
-    wait /vendor/firmware_mnt/image/keymaster.mbn 10
+    wait /vendor/firmware_mnt/image/keym2p.mdt 15
 
     # Qualcomm secure services (required for FBE / metadata decryption)
     wait /dev/qseecom
