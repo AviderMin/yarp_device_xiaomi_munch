@@ -34,8 +34,8 @@ TARGET_BOARD_PLATFORM_GPU := qcom-adreno650
 # Kernel
 TARGET_KERNEL_ARCH := arm64
 TARGET_KERNEL_HEADER_ARCH := $(TARGET_KERNEL_ARCH)
-BOARD_KERNEL_IMAGE_NAME := Image.gz-dtb
-TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/Image.gz-dtb
+BOARD_KERNEL_IMAGE_NAME := Image
+TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/Image
 # NOTE: do NOT define BOARD_BOOT_HEADER_VERSION here. Setting it (>= 3) makes AOSP
 # set BUILDING_VENDOR_BOOT_IMAGE := true (build/make/core/board_config.mk:521-531),
 # which moves the kernel cmdline out of boot.img (Makefile:1334-1348) and makes
