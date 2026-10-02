@@ -54,9 +54,30 @@ on fs
     # mount below still serves the remaining TAs (widevine etc.) and the
     # kernel firmware loader (force_sysfs_fallback).
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
-    wait /dev/block/bootdevice/by-name/modem 10
+    # ueventd's coldboot is held up ~10 s by the touch controller's firmware
+    # request (focaltech_ts_fw.bin, which does not exist anywhere in the stock
+    # dump either), and the by-name links of the late LUNs (sde -> modem) only
+    # appear afterwards (measured 12.2 s). The old 10 s wait always lost that
+    # race, so /firmware never mounted; 30 s covers it with headroom.
+    wait /dev/block/bootdevice/by-name/modem 30
     mkdir /firmware 0755 root root
     mount vfat /dev/block/bootdevice/by-name/modem /firmware ro shortname=lower
+
+    # TWRP stores its settings in TW_PERSIST_DIR, /mnt/vendor/persist/TWRP
+    # (bootable/recovery/variables.h:24-25), and the vibrator HAL reads its
+    # calibration from /mnt/vendor/persist/haptics. TWRP unmounts the mount
+    # points it manages while starting up and resolves a partition from the
+    # root path segment alone, so it cannot hold /mnt/vendor/persist itself.
+    # Mount the real partition at /persist (the path TWRP knows from
+    # twrp.flags) and bind /mnt/vendor/persist onto it; a bind is not one of
+    # TWRP's own mounts, so Is_Mounted_By_Path() reports it as mounted and
+    # TWRP leaves it alone. Same construct as upstream sm8750 (aaa74ed).
+    mkdir /mnt/vendor 0775 shell system
+    mkdir /mnt/vendor/persist 0775 shell system
+    wait /dev/block/bootdevice/by-name/persist 10
+    mount ext4 /dev/block/bootdevice/by-name/persist /persist noatime nosuid nodev barrier=1
+    mount none /persist /mnt/vendor/persist bind
+
     chmod 0660 /dev/qseecom
     chown system drmrpc /dev/qseecom
     # QSEECom allocates its shared buffers through ION; the node is root-only by
@@ -100,7 +121,6 @@ service vibratorfeature-hal-service /vendor/bin/hw/vendor.xiaomi.hardware.vibrat
     user system
     group system input
     seclabel u:r:recovery:s0
-    onrestart restart vibratorfeature
 
 # Qualcomm secure services. Recovery never imports the stock vendor init scripts
 # (stock/vendor/etc/init/*.rc), so the services the stock vendor used to declare

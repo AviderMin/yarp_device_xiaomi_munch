@@ -37,4 +37,11 @@
 /persist_image      emmc    /dev/block/bootdevice/by-name/persist                flags=display="Persist Image";backup=1;flashimg=1
 
 # Removable storage
-/usb_otg            auto    /dev/block/sdg1        /dev/block/sdg                flags=fsflags=utf8;display="USB-OTG";storage;wipeingui;removable
+# USB mass storage: the UFS LUNs already occupy sda..sdf (6 LUNs), so an OTG
+# stick enumerates as sdg / sdg1. A literal "auto" fstype is only resolved by
+# blkid inside TWPartition::Check_FS_Type() when the media is actually present;
+# with nothing plugged in it is passed to mount(2) verbatim, which makes the
+# kernel request a non-existent "fs-auto" module (dmesg: "request_module
+# fs-auto succeeded, but still no fs?"). Pin vfat for that no-media path --
+# with media attached blkid still overrides it with the real filesystem.
+/usb_otg            vfat    /dev/block/sdg1        /dev/block/sdg                flags=fsflags=utf8;display="USB-OTG";storage;wipeingui;removable
