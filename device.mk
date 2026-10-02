@@ -63,6 +63,17 @@ TARGET_RECOVERY_DEVICE_MODULES += \
 RECOVERY_LIBRARY_SOURCE_FILES += \
     $(TARGET_OUT_SHARED_LIBRARIES)/libion.so
 
+# Platform-NDK vibrator backend for the prebuilt Xiaomi vibratorfeature HAL
+# (see NEED_AIDL_NDK_PLATFORM_BACKEND in BoardConfig.mk). Recovery only searches
+# /system/lib64:/vendor/lib64/hw (bootable/recovery/etc/init.rc:30), so the
+# library has to end up in the recovery image's /system/lib64, which is exactly
+# what RECOVERY_LIBRARY_SOURCE_FILES does
+# (bootable/recovery/prebuilt/Android.mk:386-389 calls relink.sh). Listing the
+# path also makes relink_libraries require the module, so it is built and
+# installed even when only the recovery image is built.
+RECOVERY_LIBRARY_SOURCE_FILES += \
+    $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator-V1-ndk_platform.so
+
 # Crypto
 TW_INCLUDE_CRYPTO := true
 TW_INCLUDE_CRYPTO_FBE := true

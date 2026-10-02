@@ -35,6 +35,11 @@ on property:ro.boot.usbcontroller=*
 on fs
     wait /dev/block/platform/soc/${ro.boot.bootdevice}
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
+
+    # Qualcomm secure services (required for FBE / metadata decryption)
+    wait /dev/qseecom
+    start vendor.qseecomd
+
     # vibrator
     chown system system /sys/bus/i2c/drivers/aw8697_haptic/2-005a/f0_save
     chown system system /sys/bus/i2c/drivers/aw8697_haptic/2-005a/osc_save
@@ -67,10 +72,40 @@ service vibratorfeature-hal-service /vendor/bin/hw/vendor.xiaomi.hardware.vibrat
     seclabel u:r:recovery:s0
     onrestart restart vibratorfeature
 
+# Qualcomm secure services. Recovery never imports the stock vendor init scripts
+# (stock/vendor/etc/init/*.rc), so the services the stock vendor used to declare
+# have to be defined here. The binaries are prebuilts shipped inside the recovery
+# ramdisk at /system/bin; their HIDL/AIDL libraries are already pulled into the
+# recovery image by bootable/recovery/prebuilt/Android.mk.
+service vendor.qseecomd /system/bin/qseecomd
+    class core
+    user root
+    group root
+    seclabel u:r:recovery:s0
+
+service keymaster-4-0 /system/bin/android.hardware.keymaster@4.0-service-qti
+    class hal
+    user system
+    group system drmrpc
+    # Lets init resolve ctl.interface_start for
+    # android.hardware.keymaster@4.0::IKeymasterDevice/default
+    interface android.hardware.keymaster@4.0::IKeymasterDevice default
+    seclabel u:r:recovery:s0
+
+service gatekeeper-1-0 /system/bin/android.hardware.gatekeeper@1.0-service-qti
+    class hal
+    user system
+    group system
+    interface android.hardware.gatekeeper@1.0::IGatekeeper default
+    seclabel u:r:recovery:s0
+
 on post-fs
     start boot-hal-1-1
 
 on boot
     start health-hal-2-1
     start vibratorfeature-hal-service
-    
+    # QTI secure services; vendor.qseecomd is already up from on fs, so starting
+    # keymaster/gatekeeper here (instead of on init) gives QSEE time to settle.
+    start keymaster-4-0
+    start gatekeeper-1-0

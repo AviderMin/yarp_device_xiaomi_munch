@@ -64,6 +64,16 @@ system.prop
   清单缺失时会回退到 `keymaster_ver` 属性/ramdisk 清单，但保留它仍是解密路径的首选版本判定来源，因此**不要清理**。
 * **stock/ 不入库**：`.gitignore` 忽略的 `stock/` 是本地 HyperOS 官方固件转储（约 9.25 GB），
   仅作为 QTI 二进制/清单的来源素材，不属于交付内容。
+* **QTI 安全服务**：stock 固件的 `vendor/etc/init/` 下 `android.hardware.keymaster@4.0-service-qti.rc`、
+  `android.hardware.gatekeeper@1.0-service-qti.rc` 与 `qseecomd.rc` 都不会被 recovery 导入，因此
+  `recovery/root/init.recovery.qcom.rc` 自行声明 `qseecomd`（`on fs` 起）、`keymaster-4-0` 与
+  `gatekeeper-1-0`（`on boot` 起），并显式写出 `interface` 行，使 init 能解析
+  `ctl.interface_start` 的 lazy-HAL 请求。缺失时表现为
+  `android.hardware.keymaster@4.0::IKeymasterDevice/default is not registered`。
+* **AIDL 振动后端**：预编译的 `vendor.xiaomi.hardware.vibratorfeature.service` 依赖
+  `android.hardware.vibrator-V1-ndk_platform.so`，该后端默认不生成，需在 `BoardConfig.mk`
+  打开 `NEED_AIDL_NDK_PLATFORM_BACKEND := true`，并由 `device.mk` 的
+  `RECOVERY_LIBRARY_SOURCE_FILES` 收进 recovery 镜像的 `/system/lib64`。
 * **recovery 在 boot 里**：本设备没有独立 recovery 分区（`device.mk` 的 `AB_OTA_PARTITIONS` 与 `twrp.flags`
   中都没有 recovery 条目），TWRP 走 recovery-as-boot 路线，recovery 资源并入 `boot.img`；
   boot header v3 通过 `BOARD_MKBOOTIMG_ARGS += --header_version 3` 传给 `mkbootimg`，刷入目标同样是 boot 分区。
