@@ -44,18 +44,19 @@ on fs
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
 
     # Qualcomm secure services (required for FBE / metadata decryption).
-    # The keymaster/gatekeeper TrustZone apps (keymaster64.mdt etc.) live in the
+    # The keymaster/gatekeeper TrustZone apps (keym2p.mdt etc.) live in the
     # modem partition. QSEECom_start_app() does NOT open() them -- it issues
     # request_firmware(), which the kernel firmware loader resolves through
-    # ueventd. recovery/root/vendor/etc/ueventd.rc declares
-    # /vendor/firmware_mnt/image as a firmware directory and the force_sysfs_
-    # fallback write below routes the request to ueventd. Mount the modem
-    # partition there once; there is no wait for individual TA files because the
-    # loader, not init, reads them.
+    # ueventd. /firmware/image is one of ueventd's default firmware
+    # directories (see /system/etc/ueventd.rc), and twrp.flags mounts the modem
+    # partition at /firmware with mounttodecrypt -- but far too late (TWRP's
+    # own mount happens tens of seconds after init starts the crypto
+    # services), so mount it here in init. There is no wait for individual TA
+    # files: the loader, not init, reads them.
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
     wait /dev/block/bootdevice/by-name/modem 10
-    mkdir /vendor/firmware_mnt 0755 root root
-    mount vfat /dev/block/bootdevice/by-name/modem /vendor/firmware_mnt ro shortname=lower
+    mkdir /firmware 0755 root root
+    mount vfat /dev/block/bootdevice/by-name/modem /firmware ro shortname=lower
     chmod 0660 /dev/qseecom
     chown system drmrpc /dev/qseecom
 
