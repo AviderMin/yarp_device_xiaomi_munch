@@ -120,6 +120,7 @@ service vibratorfeature-hal-service /vendor/bin/hw/vendor.xiaomi.hardware.vibrat
     class hal
     user system
     group system input
+    disabled
     seclabel u:r:recovery:s0
 
 # Qualcomm secure services. Recovery never imports the stock vendor init scripts
@@ -170,10 +171,23 @@ on property:hwservicemanager.ready=true && property:vendor.sys.listeners.registe
     start gatekeeper-1-0
     start keymaster-4-0
     start vendor.keymasterd
+    # The vibrator HAL aborts on RefBase::incStrongRequireStrong() if it is
+    # started before the conditions it reads at construction time are in
+    # place. DynamicEffectDevice reads /sys/bus/i2c/drivers/awinic_haptic/
+    # 3-005a/custom_wave during its first pass and a stale id left on that
+    # node makes it build an effect from an object that is already gone
+    # (logcat: "read custom_wave_id: 197" then
+    # "F RefBase : incStrongRequireStrong() called on 0x... which isn't
+    # already owned"). On boot that node is still being re-initialised by
+    # the awinic driver, whose RAM firmware upload only finishes around
+    # 6.8 s (dmesg: "aw86927_ram_loaded: ram firmware update complete!").
+    # The same gate that brings up the QSEE-backed HALs also guarantees
+    # qseecomd is up and the persist partition -- the vibrator HAL reads its
+    # calibration from /mnt/vendor/persist/haptics -- is mounted and owned.
+    start vibratorfeature-hal-service
 
 on post-fs
     start boot-hal-1-1
 
 on boot
     start health-hal-2-1
-    start vibratorfeature-hal-service
