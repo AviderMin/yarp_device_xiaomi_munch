@@ -43,6 +43,15 @@ on fs
     # ueventd.rc. The recovery fstab already mounts these (first_stage_mount);
     # without them the TA load fails with "QSEECom_start_app failed" and
     # metadata decryption can never derive the wrapped key.
+    # Mount the modem partition early: the keymaster/gatekeeper TrustZone apps
+    # (keymaster.mbn etc.) live there and QSEECom_start_app() loads them via the
+    # kernel firmware loader, whose search path includes /vendor/firmware_mnt/image.
+    # TWRP's own mount of the recovery.fstab entries happens far too late (after
+    # init has already started the crypto services), so do it here in init.
+    mkdir /vendor/firmware_mnt 0755 root root
+    mount vfat /dev/block/bootdevice/by-name/modem /vendor/firmware_mnt ro shortname=lower
+    wait /vendor/firmware_mnt/image/keymaster.mbn 10
+
     # Qualcomm secure services (required for FBE / metadata decryption)
     wait /dev/qseecom
     start vendor.qseecomd
@@ -120,11 +129,6 @@ on post-fs
 on boot
     start health-hal-2-1
     start vibratorfeature-hal-service
-    # Firmware mounts (modem/dsp) are processed by TWRP's mount_all from
-    # recovery.fstab before services are usable; wait for the keymaster TA blob
-    # so QSEECom_start_app() can find it via the kernel firmware loader
-    # (/vendor/firmware_mnt/image is on the loader's search path).
-    wait /vendor/firmware_mnt/image/keymaster.mbn 30
     # QTI secure services; vendor.qseecomd is already up from on fs, so starting
     # keymaster/gatekeeper here (instead of on init) gives QSEE time to settle.
     start keymaster-4-0
