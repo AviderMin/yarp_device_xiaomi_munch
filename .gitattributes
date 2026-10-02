@@ -8,4 +8,6 @@
 *.so    binary
 *.img   binary
 *.apk   binary
-*.gz-dtb binary
+# The kernel payload is named exactly "Image" (no extension), so text=auto cannot
+# classify it by suffix; mark the path explicitly.
+prebuilt/Image binary

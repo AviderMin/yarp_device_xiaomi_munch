@@ -46,7 +46,7 @@ BoardConfig.mk             板级配置（编译开关、分区、TWRP 变量）
 device.mk                  产品配置（动态分区、A/B、HAL 包、加密）
 twrp_munch.mk              lunch 目标 twrp_munch
 AndroidProducts.mk         PRODUCT_MAKEFILES 注册
-prebuilt/Image.gz-dtb      预编译内核（TARGET_PREBUILT_KERNEL 路线，不源码编译内核）
+prebuilt/Image      预编译内核（TARGET_PREBUILT_KERNEL 路线，不源码编译内核）
 recovery/root/             recovery ramdisk 覆盖层（init rc、fstab、twrp.flags、stock QTI 二进制）
 system.prop
 ```
@@ -56,7 +56,7 @@ system.prop
 * **FDE 解密不再支持**：TWRP 16.0 上游 README 明确写明 `FDE decryption will not be supported in this branch`，
   本设备树只保留 FBE（`TW_INCLUDE_CRYPTO_FBE`）路线。旧的 `qcom_decrypt` / `qcom_decrypt_fbe` 包与
   `init.recovery.qcom_decrypt.rc` 引用已随移植移除。
-* **预编译内核**：内核来自 `prebuilt/Image.gz-dtb`（`TARGET_PREBUILT_KERNEL`），TWRP 16.0 的
+* **预编译内核**：内核来自 `prebuilt/Image`（`TARGET_PREBUILT_KERNEL`），TWRP 16.0 的
   `vendor/twrp/build/tasks/kernel.mk` 仍然支持该路线，不会去编译 `kernel/xiaomi/munch`。
 * **VINTF 清单保留**：`recovery/root/{system,vendor}/etc/vintf/manifest*.xml` 来自官方固件转储。
   启动时 TWRP 会扫描 `/vendor/etc/vintf/manifest*.xml` 判定 Keymaster 版本并写入 `TW_KEYMASTER_VERSION_PROP`
