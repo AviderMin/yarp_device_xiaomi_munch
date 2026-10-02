@@ -27,6 +27,10 @@
 /efsc               emmc    /dev/block/bootdevice/by-name/fsc                    flags=backup=1;subpartitionof=/efs1
 /efsg               emmc    /dev/block/bootdevice/by-name/fsg                    flags=backup=1;subpartitionof=/efs1
 
+# Userdata & metadata (FBE / metadata encryption, wrapped keys via keymaster)
+/data               auto    /dev/block/bootdevice/by-name/userdata             flags=display="Data";storage;wipeingui;backup=1
+/metadata           ext4    /dev/block/bootdevice/by-name/metadata             flags=display="Metadata";backup=0;wipeingui
+
 # Persistent Firmware & Properties
 /persist            ext4    /dev/block/bootdevice/by-name/persist                flags=display="Persist"
 /persist_image      emmc    /dev/block/bootdevice/by-name/persist                flags=display="Persist Image";backup=1;flashimg=1
