@@ -1,83 +1,326 @@
 # yarp_device_xiaomi_munch
 
-TWRP 设备树 — 小米 Redmi K40S（代号 **munch**，型号 **22021211RC**，SM8250/kona，Adreno 650）。
+TWRP 设备树 — 小米 Redmi K40S（代号 **munch**，型号 **22021211RC**，Qualcomm SM8250 / kona）。
+基于 [TeamWin/android_device_xiaomi_munch](https://github.com/TeamWin/android_device_xiaomi_munch) 移植到 **TWRP 16.0 / android-16.0.0_r1**（分支 `yarp-16`）。
 
-本仓库基于 [TeamWin/android_device_xiaomi_munch](https://github.com/TeamWin/android_device_xiaomi_munch)
-导入，并移植到 **TWRP 16.0 / android-16.0.0_r1**（分支 `yarp-16`）。
+这个仓库同时是一份「已经修好的参考实现」：FBE 元数据解密、振动 HAL、persist 设置保存三处关键问题都已定位并落地，修复点、证据和踩坑都写在下面，方便直接复用。
 
-## 设备信息
+> **维护原则**：只改设备树（`device/xiaomi/munch`），不改 AOSP 源码、不源码编译内核；所有 stock 固件里的缺件（预编译 so、固件、VINTF 清单）都放进 `recovery/root/` 随 recovery ramdisk 打包。
+
+---
+
+## 1. 设备信息
 
 | 项目 | 值 |
 | --- | --- |
-| 设备代号 | munch |
-| 市场名称 | Redmi K40S |
-| 型号 | 22021211RC |
-| SoC | Qualcomm SM8250 (kona) |
-| GPU | Adreno 650 |
+| 设备代号 / 型号 | munch / 22021211RC（Redmi K40S） |
+| SoC / GPU | Qualcomm SM8250 (kona) / Adreno 650 |
 | 出厂 API | 31 (Android 12) |
-| 当前固件基线 | HyperOS OS1.0.15.0.ULMCNXM (Android 13, RKQ1.211001.001) |
-| 分区方案 | A/B + 动态分区 (qti_dynamic_partitions, super 9126805504 字节) |
+| 固件基线 | HyperOS OS1.0.15.0.ULMCNXM (Android 13, RKQ1.211001.001) |
+| 分区方案 | A/B + 动态分区（`qti_dynamic_partitions`，super = 9126805504 B） |
+| **recovery 位置** | **在 boot 分区里**（recovery-as-boot，本机没有独立 recovery 分区） |
+| 内核 | `prebuilt/Image`，4.19.325-NijikaX-v2.9（KernelSU），预编译不参与构建 |
+| TWRP 版本串 | `3.7.1_16-AviderMin`（`TW_MAIN_VERSION_STR` + `TW_DEVICE_VERSION`） |
+| 加密方式 | FBE，metadata encryption（fscrypt policy v2 + wrapped key） |
 
-## 构建
+## 2. 功能状态
 
-前置条件：完整的 TWRP 16.0 源码树（[platform_manifest_twrp_aosp](https://github.com/TWRP-Test/platform_manifest_twrp_aosp) 分支 `twrp-16.0`）。
+| 功能 | 状态 | 说明 |
+| --- | --- | --- |
+| FBE metadata 解密（/data 挂载） | ✅ 已实机验证 | 见 [5.2](#52-fbe-元数据解密) |
+| 振动 | ✅ 已修，待刷机复验 | 缺 `vendor.awa.wavelib.so` 导致 HAL SIGABRT，见 [5.4](#54-振动-hal) |
+| TWRP 设置保存 | ✅ 已修，待刷机复验 | persist 分区改挂 `/persist` 再 bind，见 [5.5](#55-persist-挂载与设置保存) |
+| `/firmware`（modem）挂载 | ✅ 已修，待刷机复验 | `wait` 10 s → 30 s，见 [5.6](#56-firmwaremodem-与触摸固件延迟) |
+| USB OTG | ✅ 已修，需插盘验证 | fstype `auto` → `vfat`，见 [5.7](#57-usb-otg) |
+| 触摸 | ✅ 可用（开机约 10 s 后才加载固件） | stock 里就没有该固件文件，属固有现象，见 [5.6](#56-firmwaremodem-与触摸固件延迟) |
+| FDE（全盘加密）解密 | ❌ 不支持 | TWRP 16.0 上游已移除该分支能力 |
+| 命名振动效果（RTP 效果流） | ⛔ 刻意不打包 | 只保留驱动可用所需的最小集，约 29 MB 效果固件不进仓库 |
+
+## 3. 构建与刷机
+
+### 3.1 环境
 
 ```bash
 repo init --depth=1 -u https://github.com/TWRP-Test/platform_manifest_twrp_aosp.git -b twrp-16.0
 repo sync -j8 --force-sync --no-clone-bundle --no-tags
 
-# 把本设备树放到 device/xiaomi/munch
+# 设备树放到 device/xiaomi/munch
 git clone https://github.com/AviderMin/yarp_device_xiaomi_munch.git device/xiaomi/munch
 
 export ALLOW_MISSING_DEPENDENCIES=true
 . build/envsetup.sh
 lunch twrp_munch
-mka bootimage            # 本设备无 recovery 分区：TWRP 的 recovery 资源被并入 boot.img（recovery-as-boot）
+mka bootimage
 ```
 
-产物位置：`out/target/product/munch/boot.img`。本设备**没有 recovery 分区**，`BOARD_USES_RECOVERY_AS_BOOT := true`
-使 `INSTALLED_RECOVERYIMAGE_TARGET` 为空（`build/make/core/Makefile:283-296`），**不会**产出 `recovery.img`；
-TWRP 的 recovery 资源直接打进 boot 镜像，刷机写的是 boot 分区：`fastboot flash boot boot.img`。
+产物：`out/target/product/munch/boot.img`。
 
-## 目录结构
+### 3.2 刷入
 
-```
-BoardConfig.mk             板级配置（编译开关、分区、TWRP 变量）
-device.mk                  产品配置（动态分区、A/B、HAL 包、加密）
-twrp_munch.mk              lunch 目标 twrp_munch
-AndroidProducts.mk         PRODUCT_MAKEFILES 注册
-prebuilt/Image      预编译内核（TARGET_PREBUILT_KERNEL 路线，不源码编译内核）
-recovery/root/             recovery ramdisk 覆盖层（init rc、fstab、twrp.flags、stock QTI 二进制）
-system.prop
+```bash
+fastboot flash boot out/target/product/munch/boot.img
 ```
 
-## 注意事项
+本机 **没有 recovery 分区**：`device.mk` 里 `BOARD_USES_RECOVERY_AS_BOOT := true`，AOSP 因此把 `INSTALLED_RECOVERYIMAGE_TARGET` 置空（`build/make/core/Makefile:283-296`），**不会**产出 `recovery.img`；TWRP 的 recovery 资源被打进 boot 镜像，所以刷的是 `boot` 分区。
 
-* **FDE 解密不再支持**：TWRP 16.0 上游 README 明确写明 `FDE decryption will not be supported in this branch`，
-  本设备树只保留 FBE（`TW_INCLUDE_CRYPTO_FBE`）路线。旧的 `qcom_decrypt` / `qcom_decrypt_fbe` 包与
-  `init.recovery.qcom_decrypt.rc` 引用已随移植移除。
-* **预编译内核**：内核来自 `prebuilt/Image`（`TARGET_PREBUILT_KERNEL`），TWRP 16.0 的
-  `vendor/twrp/build/tasks/kernel.mk` 仍然支持该路线，不会去编译 `kernel/xiaomi/munch`。
-* **VINTF 清单保留**：`recovery/root/{system,vendor}/etc/vintf/manifest*.xml` 来自官方固件转储。
-  启动时 TWRP 会扫描 `/vendor/etc/vintf/manifest*.xml` 判定 Keymaster 版本并写入 `TW_KEYMASTER_VERSION_PROP`
-  （`bootable/recovery/twrp_functions.cpp` 的 `GetServiceFromManifest` ← `partitionmanager.cpp` 的 `Process_Keymaster_Version`）。
-  清单缺失时会回退到 `keymaster_ver` 属性/ramdisk 清单，但保留它仍是解密路径的首选版本判定来源，因此**不要清理**。
-* **stock/ 不入库**：`.gitignore` 忽略的 `stock/` 是本地 HyperOS 官方固件转储（约 9.25 GB），
-  仅作为 QTI 二进制/清单的来源素材，不属于交付内容。
-* **QTI 安全服务**：stock 固件的 `vendor/etc/init/` 下 `android.hardware.keymaster@4.0-service-qti.rc`、
-  `android.hardware.gatekeeper@1.0-service-qti.rc` 与 `qseecomd.rc` 都不会被 recovery 导入，因此
-  `recovery/root/init.recovery.qcom.rc` 自行声明 `qseecomd`（`on fs` 起）、`keymaster-4-0` 与
-  `gatekeeper-1-0`（`on boot` 起），并显式写出 `interface` 行，使 init 能解析
-  `ctl.interface_start` 的 lazy-HAL 请求。缺失时表现为
-  `android.hardware.keymaster@4.0::IKeymasterDevice/default is not registered`。
-* **AIDL 振动后端**：预编译的 `vendor.xiaomi.hardware.vibratorfeature.service` 依赖
-  `android.hardware.vibrator-V1-ndk_platform.so`，该后端默认不生成，需在 `BoardConfig.mk`
-  打开 `NEED_AIDL_NDK_PLATFORM_BACKEND := true`，并由 `device.mk` 的
-  `RECOVERY_LIBRARY_SOURCE_FILES` 收进 recovery 镜像的 `/system/lib64`。
-* **recovery 在 boot 里**：本设备没有独立 recovery 分区（`device.mk` 的 `AB_OTA_PARTITIONS` 与 `twrp.flags`
-  中都没有 recovery 条目），TWRP 走 recovery-as-boot 路线，recovery 资源并入 `boot.img`；
-  boot header v3 通过 `BOARD_MKBOOTIMG_ARGS += --header_version 3` 传给 `mkbootimg`，刷入目标同样是 boot 分区。
+> 从别的 recovery 切过来时，`fastboot flash boot` 之后如果直接进系统，注意 A/B 槽位：`fastboot --set-active=a|b` 要与刷入的槽位一致。
 
-## 许可
+## 4. 仓库结构
 
-GPL-2.0（见 [LICENSE](LICENSE)）。
+```
+BoardConfig.mk              板级配置：架构、内核、分区、mkbootimg、加密、TWRP 变量
+device.mk                   产品配置：API 级别、A/B、动态分区、HAL 包、加密开关、AIDL 振动
+twrp_munch.mk               lunch 目标 twrp_munch（继承 base / core_64_bit_only / virtual_ab_ota）
+AndroidProducts.mk          注册 PRODUCT_MAKEFILES 与 COMMON_LUNCH_CHOICES
+Android.mk                  子目录 makefile 入口
+system.prop                 ro.adb.secure=0 / ro.boot.dynamic_partitions / gatekeeper 相关
+prebuilt/Image              预编译内核（TARGET_PREBUILT_KERNEL 指向这里）
+recovery/root/              recovery ramdisk 覆盖层（会被原样打包进 ramdisk）
+├── init.recovery.qcom.rc       核心 init rc：挂载、QTI 安全服务、振动 HAL 服务
+├── init.recovery.usb.rc        USB gadget / adb / fastbootd / MTP 配置
+├── ueventd.rc                  设备节点权限规则
+├── system/etc/
+│   ├── recovery.fstab          分区表（含 metadata / userdata 加密参数）
+│   ├── twrp.flags              TWRP 自己的分区表（/firmware /persist /usb_otg 等）
+│   └── vintf/manifest.xml      TWRP 判定 Keymaster 版本用，勿删
+└── vendor/
+    ├── bin/qseecomd                        QSEECom 守护进程
+    ├── bin/keymasterd                      vendor keymasterd
+    ├── bin/hw/                             预编译 HAL：keymaster@4.0 / gatekeeper@1.0 / vibratorfeature
+    ├── etc/ueventd.rc                      追加 firmware_directories /firmware/image/
+    ├── etc/vintf/                          vendor VINTF 清单（勿删）
+    ├── firmware/aw8697_haptic.bin          内核触感 ram firmware（唯一保留的触感固件）
+    ├── firmware_mnt/image/                 keymaster / keymaster64 / sp_keymaster 分段 TA
+    └── lib64/                              QTI 安全库 + vendor.awa.wavelib.so
+stock/                      本地 HyperOS 官方固件转储（约 9.25 GB，.gitignore 忽略，非交付内容）
+log/                        调试日志（.gitignore 忽略）
+```
+
+### 4.1 关键文件速查
+
+| 文件 | 作用 | 关键行 |
+| --- | --- | --- |
+| `BoardConfig.mk` | `PLATFORM_SECURITY_PATCH := 2099-12-31`（解密关键）、`NEED_AIDL_NDK_PLATFORM_BACKEND := true`、`BOARD_MKBOOTIMG_ARGS += --header_version 3` | :62, :91-92, :50 |
+| `device.mk` | `BOARD_USES_RECOVERY_AS_BOOT := true`、`RECOVERY_LIBRARY_SOURCE_FILES` 收 AIDL 振动后端、`TW_SUPPORT_INPUT_AIDL_HAPTICS` | :18, :74-75, :95-96 |
+| `recovery/root/init.recovery.qcom.rc` | `on fs` 挂载链（modem/persist/bind）、QTI 服务声明、振动 HAL 服务 | :42, :62, :75-79, :119, :130-160 |
+| `recovery/root/system/etc/twrp.flags` | `/firmware` `/persist` `/usb_otg` `/data` 的 TWRP 分区定义 | :33, :36, :47 |
+| `recovery/root/system/etc/recovery.fstab` | userdata 的 FBE metadata 参数（wrappedkey_v0）、metadata、modem | :53, :58, :63 |
+
+## 5. 关键技术实现
+
+### 5.1 recovery-as-boot
+
+- `device.mk` 打开 `BOARD_USES_RECOVERY_AS_BOOT := true`，并启用 `ENABLE_VIRTUAL_AB := true` / `AB_OTA_UPDATER := true`。
+- boot 镜像头版本走 `BOARD_MKBOOTIMG_ARGS += --header_version 3`（`BoardConfig.mk:50`），由 AOSP 直接透传给 `mkbootimg`（`build/make/core/Makefile:1299/1398`）。
+- ⚠️ **不要在 `BoardConfig.mk` 里定义 `BOARD_BOOT_HEADER_VERSION`**：任何 ≥3 的值都会让 AOSP 置 `BUILDING_VENDOR_BOOT_IMAGE := true`（`build/make/core/board_config.mk:521-531`），把内核 cmdline 从 boot.img 挪走，TWRP 的 `twrpfastboot=1`（`vendor/twrp/config/BoardConfigTWRP.mk:7`）就落不进任何镜像。
+- 内核走预编译路线：`TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/Image`（`BoardConfig.mk:38`），不编译 `kernel/xiaomi/munch`。
+
+### 5.2 FBE 元数据解密
+
+**症状**：TWRP 看得见 `/metadata`，但 `I:Unable to decrypt metadata encryption`，`/data` 探测失败。
+
+**根因链**（`log/live/logcat_all.txt`:2524-2558）：
+
+```
+rsp_header->status: -62 (KEY_REQUIRES_UPGRADE)
+  -> keystore2 upgrade_keyblob_if_required_with
+  -> Error::Km(INVALID_ARGUMENT) -38
+  -> decryptWithKeystoreKey failed
+  -> I:Unable to decrypt metadata encryption
+```
+
+**key blob 里的真实参数**（`/metadata/vold/metadata_encryption/key/keymaster_key_blob`，232 B，magic `pKMblob` + CBOR）：
+
+| Keymaster tag | 值 | TWRP 原来给的 |
+| --- | --- | --- |
+| `OS_VERSION` (705) | 160000 | 160000 ✅ |
+| `OS_PATCHLEVEL` (706) | 202608 | 202506 ❌ |
+| `VENDOR_PATCHLEVEL` (718) | 20260801 | 0 / 空 ❌ |
+| `BOOT_PATCHLEVEL` (719) | 20250301 | 20250301 ✅ |
+
+Keymaster 4.0 的 HAL（`libqtikeymaster4.so`）只读三个属性：`ro.build.version.release`、`ro.build.version.security_patch`、`ro.vendor.build.security_patch`；`BOOT_PATCHLEVEL` 只能来自 bootloader / boot 镜像头，属性改不动它。
+
+**已落地修复**：`BoardConfig.mk:91-92`
+
+```make
+PLATFORM_SECURITY_PATCH := 2099-12-31
+VENDOR_SECURITY_PATCH := $(PLATFORM_SECURITY_PATCH)
+```
+
+这样生成出的属性是 `ro.build.version.security_patch=2099-12-31` 与 `ro.vendor.build.security_patch=2099-12-31`。比 blob 要求的日期更新，Keymaster 会在 TEE 里做一次性升级，且**不落盘**：
+
+```
+KeyMint upgraded <blob> for this operation only; the on-disk blob is left unchanged
+```
+
+因此刷回官方系统不受影响。实测结果：`Successfully decrypted metadata encrypted data partition with new block device: '/dev/block/mapper/userdata'` → `All found users are decrypted` → `/data` 以 f2fs rw 挂载。
+
+**备选方案**：把 patch level 精确设成 blob 里的 `2026-08-01` 也能解密（已用 `resetprop` 在设备上验证过），只是维持一个会过期的日期不如远未来值省事。
+
+**踩过的坑**：
+
+* 不要把 `ro.build.version.security_patch` 写进设备树 `system.prop`：`build/make/tools/post_process_props.py:97-141` 的 `override_optional_props(allow_dup=False)` 会直接报 `error: found duplicate sysprop assignments` 让构建失败。
+* `ro.vendor.build.security_patch` 原本没人赋值（`build/make/core/sysprop_config.mk:122` 从 `VENDOR_SECURITY_PATCH` 取），所以必须显式给 `VENDOR_SECURITY_PATCH` 赋值。
+* 属性最终来源是 `prop.default`（`build/make/core/Makefile:2716-2730` 按 system→vendor→odm→product→system_ext→recovery-ui 顺序拼接），init 后加载覆盖先加载。
+* `resetprop` 改这两个属性只对当前这次启动有效，**不能**作为永久修复；永久修复必须在设备树里。
+
+### 5.3 QTI 安全服务（qseecomd / keymaster / gatekeeper）
+
+recovery 不会导入 stock 的 `vendor/etc/init/*.rc`，所以 `init.recovery.qcom.rc` 必须自己声明这些服务：
+
+| 服务 | 定义位置 | 说明 |
+| --- | --- | --- |
+| `vendor.qseecomd` | :130 | `class core`，`on fs` 里 `start`（:92） |
+| `vendor.keymasterd` | :139 | `class hal`，依赖 `hwservicemanager.ready` + `vendor.sys.listeners.registered` |
+| `keymaster-4-0` | :147 | 必须写 `interface android.hardware.keymaster@4.0::IKeymasterDevice default`，否则 `ctl.interface_start` 的 lazy HAL 请求找不到服务 |
+| `gatekeeper-1-0` | :156 | 同上，`interface android.hardware.gatekeeper@1.0::IGatekeeper default` |
+
+启动门槛在 `:169`（`on property:hwservicemanager.ready=true && property:vendor.sys.listeners.registered=true`），`on boot`（:177）再拉起振动 HAL 等普通服务。
+
+另外 `on early-init` 会把 `/vendor/lib64` bind 到 `/vendor_lib64`（:33），后续即使真 vendor 分区被挂上也不会遮蔽这些安全库。
+
+**keymaster TA 在哪**：munch 的 keymaster TA 不是 modem 分区里的，而是 `keymaster_a` 分区（sde11）的签名镜像；树里以拆分 MBN 形式放在 `recovery/root/vendor/firmware_mnt/image/`（`keymaster.*` / `keymaster64.*` / `sp_keymaster.*` 共 27 个文件）。`libkeymasterdeviceutils.so` 硬编码搜索 `/vendor/firmware_mnt/image`，QSEECom 打开 `<dir>/<app>.mdt` 与 `.b00..`。
+
+### 5.4 振动 HAL
+
+**症状**：`vibratorfeature-hal-service` 起来就 `Fatal signal 6 (SIGABRT)`，约每 5 s 一次，`IVibrator/vibratorfeature` 永远不注册 ⇒ 完全不振动。
+
+**崩溃序列**（旧日志）：
+
+```
+open /sys/class/leds/vibrator/activate failed, errno = 2
+The nv_flag_value: -1
+Use the default Stream file!
+parse id faild for: . / .. / aw8697_haptic.bin
+load 0 effect
+fail to load lib : /vendor/lib64/vendor.awa.wavelib.so   <-- 致命点
+F libc : Fatal signal 6 (SIGABRT)
+```
+
+内核侧一直是好的（`[haptic_hv]aw86927 detected`、`aw86927_ram_loaded: ram firmware update complete!`），问题全在 userspace 缺件。
+
+**构成部件的来源**：
+
+| 部件 | 位置 | 说明 |
+| --- | --- | --- |
+| HAL 二进制 | `recovery/root/vendor/bin/hw/vendor.xiaomi.hardware.vibratorfeature.service` | stock 预编译，服务声明在 `init.recovery.qcom.rc:119`（`seclabel u:r:recovery:s0`） |
+| AIDL NDK 后端 | `device.mk` 的 `RECOVERY_LIBRARY_SOURCE_FILES` | `android.hardware.vibrator-V1-ndk_platform.so`，需 `NEED_AIDL_NDK_PLATFORM_BACKEND := true`，靠 `relink.sh` 进 recovery 的 `/system/lib64` |
+| Ext 接口库 | `recovery/root/vendor/lib64/vendor.hardware.vibratorfeature.IVibratorExt-V1-ndk_platform.so` | 已随树提供 |
+| 波形库 | `recovery/root/vendor/lib64/vendor.awa.wavelib.so`（631200 B） | **原来缺这个**，HAL 用 `dlopen` + `dlsym(awa_haptics_init / awa_haptics_get_waves_length / awa_haptics_get_waves_data)` 调它 |
+| 内核 ram firmware | `recovery/root/vendor/firmware/aw8697_haptic.bin`（3622 B） | 内核触感驱动的固件，唯一保留的触感固件 |
+| 校准数据 | `/mnt/vendor/persist/haptics/{nv_flag,vib_cal_f0,vib_cal_z,vib_cal_osc}` | HAL 硬编码路径，靠 [5.5](#55-persist-挂载与设置保存) 的 persist 挂载满足 |
+
+**刻意不打包的部分**：stock 里 296 个 `*RTP.bin` + 47 个 `*_rtp.bin` 效果流共约 29 MB，**没有**放进设备树。基础振动（`activate` / `duration`）走内核 awinic 驱动，不需要效果流；没有效果文件时 HAL 只会打印 `load 0 effect` 并使用默认 stream。需要系统命名效果（游戏/铃声触感等）时再按需补对应文件到 `recovery/root/vendor/firmware/` 即可，HAL 的正则是 `([0-9]*)_(.[^_]*)_([0-9]*KHz_)?([S|P]_)?([0-9]{1,}[.][0-9]*_)?RTP.bin`。
+
+**顺带清掉的坑**：`init.recovery.qcom.rc` 里原来的 `onrestart restart vibratorfeature` 指向一个不存在的服务（服务名是 `vibratorfeature-hal-service`），会形成自重启循环，已删除。
+
+### 5.5 persist 挂载与设置保存
+
+**症状**：TWRP 里改的设置重启后丢失，`recovery.log` 里有 `Unable to find partition for path /mnt/vendor/persist/TWRP`。
+
+**原因**：TWRP 16.0 把设置目录定义为 `TW_PERSIST_DIR = /mnt/vendor/persist/TWRP`（`bootable/recovery/variables.h:24-25`，`TW_PERSIST_ROOT = /mnt/vendor/persist`），而本树 `recovery.fstab:58` 的那行 persist 是注释掉的，TWRP 的分区表里没有挂载点是 `/mnt/vendor/persist` 的表项，于是解析不到分区、设置写不进去。
+
+**修复**（`init.recovery.qcom.rc:75-79`，取自上游 sm8750 的做法）：
+
+```
+mkdir /mnt/vendor 0775 shell system
+mkdir /mnt/vendor/persist 0775 shell system
+wait /dev/block/bootdevice/by-name/persist 10
+mount ext4 /dev/block/bootdevice/by-name/persist /persist noatime nosuid nodev barrier=1
+mount none /persist /mnt/vendor/persist bind
+```
+
+为什么绕这一圈：TWRP 启动时会卸载自己管理的挂载点，并且只按路径首段解析分区，所以它「拿不住」`/mnt/vendor/persist` 本身。真分区挂到 `/persist`（这个挂载点 TWRP 认得，见 `twrp.flags:36`），再从 `/persist` bind 到 `/mnt/vendor/persist`；bind 不在 TWRP 自己的挂载列表里，`PartitionManager::Is_Mounted_By_Path()`（`infomanager.cpp:67-72`）会认为它已挂载，于是既不会被卸载，也不需要解析分区，设置就能稳稳写进真分区。
+
+参考上游实现：[lingqiqi5211/twrp_device_xiaomi_sm8750@aaa74ed](https://github.com/lingqiqi5211/twrp_device_xiaomi_sm8750/commit/aaa74ed11b18d69a4ba17976803f184b66ab1517)。
+
+### 5.6 /firmware(modem) 与触摸固件延迟
+
+**症状**：`Failed to mount '/firmware' (No such file or directory)`，`Actual block device: ''`，开机被拖 10 s。
+
+**原因**：`init.recovery.qcom.rc` 里 `wait /dev/block/bootdevice/by-name/modem 10` 超时。ueventd 的 coldboot 被触摸控制器的固件请求卡住约 10 s（`focaltech_ts_fw.bin`，这个文件**在 9.25 GB 的 stock 转储里根本不存在**，官方系统上同样会失败），晚 LUN 的 by-name 链接实测要 12.2 s 才出现，10 s 的等待必然输掉这个竞态。
+
+**修复**：`wait .../by-name/modem 30`（`init.recovery.qcom.rc:62`），给足余量。
+
+注意触摸本身是好的：固件请求走异步 sysfs fallback，probe 在 0.9–1.36 s 就完成了，只是那次失败要等 10 s 才超时。**不要**去伪造 `focaltech_ts_fw.bin` 放进设备树，官方固件里没有这个文件。
+
+### 5.7 USB OTG
+
+**症状**：`Unable to mount '/usb_otg'`，`/usb_otg Size: 0 B`，内核有 `request_module fs-auto succeeded, but still no fs?`。
+
+**原因**：`twrp.flags` 里 `/usb_otg` 的 fstype 写的是 `auto`。TWRP 只在介质在位时才用 blkid 解析出真实文件系统（`partition.cpp` 的 `Check_FS_Type()`：`Is_Present == false` 就直接返回），没插盘时字符串 `auto` 被原样交给 `mount(2)`，内核去找一个不存在的 `fs-auto` 模块。
+
+**修复**：`twrp.flags:47` 改成 `vfat`。设备节点路径本身没错：UFS 的 6 个 LUN 已经占满 `sda..sdf`，OTG 盘只会是 `sdg` / `sdg1`。插着盘时 blkid 仍会覆盖成真实文件系统，所以固定 `vfat` 不会伤到真实 U 盘。
+
+## 6. 修复索引（症状 → 根因 → 落点）
+
+| 症状 | 根因 | 落点 |
+| --- | --- | --- |
+| `Unable to decrypt metadata encryption` | key blob 的 OS/VENDOR patchlevel 与属性不匹配，TA 升级失败（-62 / -38） | `BoardConfig.mk:91-92` |
+| 完全不振动、HAL 每 5 s SIGABRT | `/vendor/lib64/vendor.awa.wavelib.so` 缺件 | 新增 `recovery/root/vendor/lib64/vendor.awa.wavelib.so` |
+| 设置重启后丢失 | persist 分区没挂，`TW_PERSIST_DIR` 解析不到分区 | `init.recovery.qcom.rc:75-79` |
+| 振动校准读不到（`nv_flag = -1`） | HAL 读 `/mnt/vendor/persist/haptics`，同一分区未挂 | 同上 |
+| 开机卡 10 s、`/firmware` 挂不上 | by-name 链接出现晚于 10 s 的等待 | `init.recovery.qcom.rc:62`（10 → 30） |
+| `/usb_otg` 挂载失败 | fstype `auto` 在无介质时直达 `mount(2)` | `twrp.flags:47`（auto → vfat） |
+| HAL 自重启循环 | `onrestart restart vibratorfeature` 指向不存在的服务 | `init.recovery.qcom.rc`（已删） |
+
+## 7. 已知问题与限制
+
+* **FDE 不支持**：TWRP 16.0 上游明确 `FDE decryption will not be supported in this branch`，本树只保留 FBE 路线；旧的 `qcom_decrypt` / `qcom_decrypt_fbe` 包与 `init.recovery.qcom_decrypt.rc` 均已移除。
+* **触摸固件请求必然失败**：`focaltech_ts_fw.bin` 在 stock 中不存在（见 [5.6](#56-firmwaremodem-与触摸固件延迟)），只能等它超时，表现为开机多等约 10 s 的 ueventd；已通过加大 `wait` 避免连带影响 `/firmware`。
+* **`/sys/class/leds/vibrator/activate` 不存在**：HAL 会打印 `errno = 2` 后回退，不影响基础振动（awinic 驱动节点在 `/sys/bus/i2c/drivers/awinic_haptic/`，已在 rc 里放开权限）。
+* **不带命名振动效果**：见 [5.4](#54-振动-hal)，需要时按需补 `*RTP.bin`。
+* **无 AIDL health HAL**：TWRP 回退到 HIDL，日志里有对应提示，属正常噪音。
+* **大量 permissive avc denial**：recovery 跑在 permissive 下，日志刷屏是正常的。
+* **KernelSU 内核**：`prebuilt/Image` 带 KernelSU hook，启动日志里会出现相关行。
+* **`preserve` 相关**：`BOARD_ROOT_EXTRA_FOLDERS` 里的 `persist` 只影响 system-as-root 目录布局，与 [5.5](#55-persist-挂载与设置保存) 的挂载无冲突。
+
+## 8. 刷机后自检
+
+```bash
+adb shell getprop ro.build.version.security_patch        # 期望 2099-12-31
+adb shell getprop ro.vendor.build.security_patch         # 期望 2099-12-31
+adb shell mount | grep -E 'persist|firmware|usb_otg'     # 期望看到 /persist 与 /mnt/vendor/persist
+adb shell ls -l /persist/TWRP/.twrp_settings             # 设置文件应存在
+adb shell ls /vendor/firmware /vendor/lib64/vendor.awa.wavelib.so
+adb shell getprop init.svc.vibratorfeature-hal-service   # 期望 running
+adb shell dmesg | grep -iE 'timed out|aw86927'           # 不应再有 10005ms 超时
+```
+
+## 9. 排障
+
+日志位置：
+
+| 来源 | 位置 |
+| --- | --- |
+| TWRP 主日志 | `/tmp/recovery.log`（TWRP 界面里也可以直接复制到存储） |
+| 内核 | `dmesg` |
+| Android | `logcat` |
+
+关键字速查：
+
+```
+Unable to decrypt metadata encryption   -> 解密链（见 5.2）
+KeyMint upgraded ... left unchanged     -> TA 运行时升级，正常
+status: -62 / INVALID_ARGUMENT          -> patch level 不匹配
+Fatal signal 6 / fail to load lib       -> HAL 缺件（见 5.4）
+Unable to find partition for path       -> TWRP 分区表缺项（见 5.5）
+timed out and took 10005ms              -> by-name 等待过短（见 5.6）
+request_module fs-auto / no fs?         -> fstype auto（见 5.7）
+```
+
+## 10. 维护约定
+
+* **不要删** `recovery/root/{system,vendor}/etc/vintf/manifest*.xml`：TWRP 靠它判定 Keymaster 版本（`bootable/recovery/twrp_functions.cpp` 的 `GetServiceFromManifest` ← `partitionmanager.cpp` 的 `Process_Keymaster_Version`），删了会回退到默认判定。
+* **不要**把 security patch 写进 `system.prop`（重复 sysprop，构建直接失败，见 [5.2](#52-fbe-元数据解密)）。
+* **不要**定义 `BOARD_BOOT_HEADER_VERSION`（见 [5.1](#51-recovery-as-boot)）。
+* **不要** `git clean -fdx`：`stock/` 是本地素材且被 ignore，树里大量预编译二进制一旦被清掉无法从仓库恢复。
+* 新增的 `.so` / 固件 / HAL 二进制都要 `git add`：它们不是从源码编译出来的，漏提交会让新克隆的构建缺件（`vendor.awa.wavelib.so` 就是典型）。
+* 改完设备树记得核对 stock 与 ramdisk 的差异，只补「确实缺且被引用」的文件，不要整目录复制（振动效果固件就是反例）。
+
+## 11. 许可与致谢
+
+* 本仓库：GPL-2.0，见 [LICENSE](LICENSE)。
+* [TeamWin/android_device_xiaomi_munch](https://github.com/TeamWin/android_device_xiaomi_munch)（原始设备树）、[SebaUbuntu TWRP device tree generator](https://github.com/SebaUbuntu/android_device_generator-twrp)（骨架）。
+* [TWRP-Test/platform_manifest_twrp_aosp](https://github.com/TWRP-Test/platform_manifest_twrp_aosp)（TWRP 16.0 清单）。
+* [lingqiqi5211/twrp_device_xiaomi_sm8750@aaa74ed](https://github.com/lingqiqi5211/twrp_device_xiaomi_sm8750/commit/aaa74ed11b18d69a4ba17976803f184b66ab1517)（persist 挂载思路）。
