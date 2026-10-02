@@ -44,21 +44,25 @@ on fs
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
 
     # Qualcomm secure services (required for FBE / metadata decryption).
-    # The keymaster/gatekeeper TrustZone apps (keym2p.mdt etc.) live in the
-    # modem partition. QSEECom_start_app() does NOT open() them -- it issues
-    # request_firmware(), which the kernel firmware loader resolves through
-    # ueventd. /firmware/image is one of ueventd's default firmware
-    # directories (see /system/etc/ueventd.rc), and twrp.flags mounts the modem
-    # partition at /firmware with mounttodecrypt -- but far too late (TWRP's
-    # own mount happens tens of seconds after init starts the crypto
-    # services), so mount it here in init. There is no wait for individual TA
-    # files: the loader, not init, reads them.
+    # libkeymasterdeviceutils.so hardcodes the TA directory
+    # /vendor/firmware_mnt/image and asks QSEECom for keymaster64/keymaster/
+    # sp_keymaster (QSEECom opens <dir>/<app>.mdt + .b00.. segment files).
+    # The keymaster TA does NOT live in the modem partition on munch -- it is
+    # the signed image of the keymaster_a partition (sde11). Ship the split
+    # MBN files in the recovery ramdisk at /vendor/firmware_mnt/image/ so the
+    # hardcoded path resolves without any partition mount. The /firmware
+    # mount below still serves the remaining TAs (widevine etc.) and the
+    # kernel firmware loader (force_sysfs_fallback).
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
     wait /dev/block/bootdevice/by-name/modem 10
     mkdir /firmware 0755 root root
     mount vfat /dev/block/bootdevice/by-name/modem /firmware ro shortname=lower
     chmod 0660 /dev/qseecom
     chown system drmrpc /dev/qseecom
+    # QSEECom allocates its shared buffers through ION; the node is root-only by
+    # default, so every listener registration and start_app fails without this.
+    chmod 0664 /dev/ion
+    chown system system /dev/ion
 
     # qseecomd's RPMB/SSD listeners need the UFS by-name links; wait for one
     # before starting so the first start succeeds (taro pattern).
