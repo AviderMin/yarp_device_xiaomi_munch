@@ -1,0 +1,12 @@
+# Recovery ueventd rules for the Qualcomm secure stack.
+#
+# QSEECom_start_app() loads the keymaster/gatekeeper TrustZone apps
+# (keymaster64.mdt, keym2p.mdt, ...) with request_firmware(). The kernel
+# firmware loader then asks ueventd, which searches the directories listed
+# here. The modem partition is mounted at /vendor/firmware_mnt from
+# init.recovery.qcom.rc 'on fs', so its image/ directory holds the TA files.
+firmware_directories /vendor/firmware_mnt/image/
+
+subsystem qseecom
+    devname uevent_devpath
+    dirname /dev/qseecom

@@ -25,6 +25,13 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
+on early-init
+    # Bind the ramdisk's vendor libraries where TWRP's later mount of the real
+    # vendor partition over /vendor cannot shadow them (taro pattern). The
+    # security services below search /vendor_lib64 first.
+    mkdir /vendor_lib64 0755 root root
+    mount none /vendor/lib64 /vendor_lib64 bind
+
 on init
     write /sys/class/backlight/panel0-backlight/brightness 200
 
@@ -36,23 +43,26 @@ on fs
     wait /dev/block/platform/soc/${ro.boot.bootdevice}
     symlink /dev/block/platform/soc/${ro.boot.bootdevice} /dev/block/bootdevice
 
-    # Firmware mounts needed by the Qualcomm secure stack below: the keymaster
-    # and gatekeeper TrustZone apps (keymaster.mbn etc.) live in the modem
-    # partition and QSEECom_start_app() loads them through the kernel firmware
-    # loader, whose search path includes /vendor/firmware_mnt/image (see ueventd
-    # firmware search order: /etc/firmware, /odm/firmware, /vendor/firmware,
-    # /firmware/image -- and the QSEECom driver also queries /vendor/firmware_mnt).
-    # TWRP's own mount of the recovery.fstab entries happens far too late (after
-    # init has already started the crypto services), so mount here in init.
-    # ueventd creates the by-name links during coldplug which runs concurrently
-    # with 'on fs', so wait for the node before mounting.
+    # Qualcomm secure services (required for FBE / metadata decryption).
+    # The keymaster/gatekeeper TrustZone apps (keymaster64.mdt etc.) live in the
+    # modem partition. QSEECom_start_app() does NOT open() them -- it issues
+    # request_firmware(), which the kernel firmware loader resolves through
+    # ueventd. recovery/root/vendor/etc/ueventd.rc declares
+    # /vendor/firmware_mnt/image as a firmware directory and the force_sysfs_
+    # fallback write below routes the request to ueventd. Mount the modem
+    # partition there once; there is no wait for individual TA files because the
+    # loader, not init, reads them.
+    write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
     wait /dev/block/bootdevice/by-name/modem 10
     mkdir /vendor/firmware_mnt 0755 root root
     mount vfat /dev/block/bootdevice/by-name/modem /vendor/firmware_mnt ro shortname=lower
-    wait /vendor/firmware_mnt/image/keym2p.mdt 15
+    chmod 0660 /dev/qseecom
+    chown system drmrpc /dev/qseecom
 
-    # Qualcomm secure services (required for FBE / metadata decryption)
+    # qseecomd's RPMB/SSD listeners need the UFS by-name links; wait for one
+    # before starting so the first start succeeds (taro pattern).
     wait /dev/qseecom
+    wait /dev/block/bootdevice/by-name/ssd 10
     start vendor.qseecomd
 
     # vibrator
@@ -95,7 +105,8 @@ service vibratorfeature-hal-service /vendor/bin/hw/vendor.xiaomi.hardware.vibrat
 service vendor.qseecomd /vendor/bin/qseecomd
     class core
     user root
-    group root
+    group root drmrpc
+    setenv LD_LIBRARY_PATH /vendor_lib64:/vendor_lib64/hw:/vendor/lib64:/vendor/lib64/hw:/system/lib64:/sbin
     seclabel u:r:recovery:s0
 
 # keymasterd keeps the keymaster TA alive and services vendor.qti.qseecom
@@ -103,24 +114,37 @@ service vendor.qseecomd /vendor/bin/qseecomd
 service vendor.keymasterd /vendor/bin/keymasterd
     class core
     user system
-    group system
+    group system drmrpc
+    setenv LD_LIBRARY_PATH /vendor_lib64:/vendor_lib64/hw:/vendor/lib64:/vendor/lib64/hw:/system/lib64:/sbin
+    disabled
     seclabel u:r:recovery:s0
 
 service keymaster-4-0 /vendor/bin/hw/android.hardware.keymaster@4.0-service-qti
     class hal
     user system
     group system drmrpc
-    # Lets init resolve ctl.interface_start for
-    # android.hardware.keymaster@4.0::IKeymasterDevice/default
     interface android.hardware.keymaster@4.0::IKeymasterDevice default
+    setenv LD_LIBRARY_PATH /vendor_lib64:/vendor_lib64/hw:/vendor/lib64:/vendor/lib64/hw:/system/lib64:/sbin
+    disabled
     seclabel u:r:recovery:s0
 
 service gatekeeper-1-0 /vendor/bin/hw/android.hardware.gatekeeper@1.0-service-qti
     class hal
     user system
-    group system
+    group system drmrpc
     interface android.hardware.gatekeeper@1.0::IGatekeeper default
+    setenv LD_LIBRARY_PATH /vendor_lib64:/vendor_lib64/hw:/vendor/lib64:/vendor/lib64/hw:/system/lib64:/sbin
+    disabled
     seclabel u:r:recovery:s0
+
+# Start the HIDL HALs only once qseecomd has registered its QSEE listeners and
+# hwservicemanager is up (taro pattern). vendor.sys.listeners.registered is set
+# by qseecomd itself; without this gate the HALs call QSEECom_start_app before
+# QSEE is ready and crash-loop.
+on property:hwservicemanager.ready=true && property:vendor.sys.listeners.registered=true
+    start gatekeeper-1-0
+    start keymaster-4-0
+    start vendor.keymasterd
 
 on post-fs
     start boot-hal-1-1
@@ -128,8 +152,3 @@ on post-fs
 on boot
     start health-hal-2-1
     start vibratorfeature-hal-service
-    # QTI secure services; vendor.qseecomd is already up from on fs, so starting
-    # keymaster/gatekeeper here (instead of on init) gives QSEE time to settle.
-    start keymaster-4-0
-    start gatekeeper-1-0
-    start vendor.keymasterd

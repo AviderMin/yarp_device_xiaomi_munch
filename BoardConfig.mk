@@ -108,6 +108,9 @@ TW_HAS_EDL_MODE := true
 # bootable/recovery/libtar/libtar_defaults.go picks v1 only when this is exactly
 # "1"; any other value (incl. 2) selects v2, i.e. 2 == default == what we want.
 TW_USE_FSCRYPT_POLICY := 2
+# Skip APEX loop mounting in recovery. Runtime APEX probes fail on this kernel
+# and only add a failed mount attempt before metadata decryption (taro pattern).
+TW_EXCLUDE_APEX := true
 TW_BACKUP_EXCLUSIONS := /data/fonts
 
 TW_STATUS_ICONS_ALIGN := center
