@@ -4,22 +4,3 @@ ro.boot.dynamic_partitions=true
 
 # Gatekeeper
 vendor.gatekeeper.disable_spu=true
-
-# Keymaster OS_PATCHLEVEL for FBE metadata decryption.
-#
-# The metadata key blob stores the patch level of the ROM that created it
-# (OS_PATCHLEVEL=202608 = 2026-08-01).  The Keymaster 4.0 HAL reports
-# ro.build.version.security_patch as OS_PATCHLEVEL, and a mismatch makes
-# begin() fail with KEY_REQUIRES_UPGRADE (-62); the TA then rejects the
-# upgrade as a downgrade with INVALID_ARGUMENT (-38) and metadata decryption
-# fails.
-#
-# The generated value comes from PLATFORM_SECURITY_PATCH, which Android 16
-# keeps in .KATI_READONLY release flags (build/make/core/version_util.mk:54-57,
-# here 2025-06-05), so it cannot be changed with a device-tree variable.  This
-# file lands in prop.default after the generated
-# ro.build.version.security_patch line and init's property loader keeps the
-# last value seen, so the value below wins.  Update it together with
-# VENDOR_SECURITY_PATCH / BOOT_SECURITY_PATCH in BoardConfig.mk whenever the
-# installed ROM's security patch level changes.
-ro.build.version.security_patch=2026-08-01
