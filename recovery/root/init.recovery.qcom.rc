@@ -120,6 +120,15 @@ service vibratorfeature-hal-service /vendor/bin/hw/vendor.xiaomi.hardware.vibrat
     class hal
     user system
     group system input
+    # The QSEE-backed HALs below (qseecomd, keymasterd, keymaster-4-0,
+    # gatekeeper-1-0) all pin the same search path, and it deliberately puts
+    # the ramdisk's own /vendor_lib64 bind ahead of /vendor/lib64. TWRP mounts
+    # the real stock vendor partition over /vendor later in the boot, so
+    # without this line the stock libraries win the search and a HAL started
+    # then can die on a versioned-symbol error against the binder copy the
+    # recovery image itself pulls in. The vibrator HAL was the one service
+    # here that had no setenv at all; give it the same one as its neighbours.
+    setenv LD_LIBRARY_PATH /vendor_lib64:/vendor_lib64/hw:/vendor/lib64:/vendor/lib64/hw:/system/lib64:/sbin
     disabled
     seclabel u:r:recovery:s0
 

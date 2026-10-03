@@ -28,7 +28,7 @@ TWRP 设备树 — 小米 Redmi K40S（代号 **munch**，型号 **22021211RC**�
 | 功能 | 状态 | 说明 |
 | --- | --- | --- |
 | FBE metadata 解密（/data 挂载） | ✅ 已实机验证 | 见 [5.2](#52-fbe-元数据解密) |
-| 振动 | ✅ 已修，待刷机复验 | 缺 `vendor.awa.wavelib.so` 导致 HAL SIGABRT，见 [5.4](#54-振动-hal) |
+| 振动 | 🔶 修复进行中 | wavelib 缺件已补，但致命点已前移到空效果表导致的 `RefBase` abort；三处改动待刷机验证，见 [5.4](#54-振动-hal) |
 | TWRP 设置保存 | ✅ 已修，待刷机复验 | persist 分区改挂 `/persist` 再 bind，见 [5.5](#55-persist-挂载与设置保存) |
 | `/firmware`（modem）挂载 | ✅ 已修，待刷机复验 | `wait` 10 s → 30 s，见 [5.6](#56-firmwaremodem-与触摸固件延迟) |
 | USB OTG | ✅ 已修，需插盘验证 | fstype `auto` → `vfat`，见 [5.7](#57-usb-otg) |
@@ -185,19 +185,26 @@ recovery 不会导入 stock 的 `vendor/etc/init/*.rc`，所以 `init.recovery.q
 
 **症状**：`vibratorfeature-hal-service` 起来就 `Fatal signal 6 (SIGABRT)`，约每 5 s 一次，`IVibrator/vibratorfeature` 永远不注册 ⇒ 完全不振动。
 
-**崩溃序列**（旧日志）：
+**崩溃序列**（06-18 实机日志，wavelib 补齐之后）：
 
 ```
 open /sys/class/leds/vibrator/activate failed, errno = 2
-The nv_flag_value: -1
+The nv_flag_value: 0                    <-- persist 已挂载，校准数据读到了
 Use the default Stream file!
 parse id faild for: . / .. / aw8697_haptic.bin
 load 0 effect
-fail to load lib : /vendor/lib64/vendor.awa.wavelib.so   <-- 致命点
-F libc : Fatal signal 6 (SIGABRT)
+success to load lib : /vendor/lib64/vendor.awa.wavelib.so
+AWA Haptics Library Version: AWAAXA1LPM215I0A ; awa_haptics_init f0 = 173
+DynamicEffectDevice: find haptic folder .../3-005a/custom_wave
+F RefBase : incStrongRequireStrong() called on 0x... which isn't already owned   <-- 致命点
+F libc : Fatal signal 6 (SIGABRT), code -1 (SI_QUEUE)
 ```
 
-内核侧一直是好的（`[haptic_hv]aw86927 detected`、`aw86927_ram_loaded: ram firmware update complete!`），问题全在 userspace 缺件。
+**致命点已经从「缺 wavelib」前移到「效果表为空」。** `RefBase` 是 Android 的引用计数基类，它主动 abort 说明代码对一个引用计数已归零的对象调了 `incStrong()`。`load 0 effect` 是直接证据：HAL 遍历波形目录，只看到 `.`、`..` 和内核 RAM 固件 `aw8697_haptic.bin`，一个 `*RTP.bin` 都没有，构造 DynamicEffectDevice 的效果对象时踩到已释放对象。
+
+内核侧一直是好的（`[haptic_hv]aw86927 detected`、`aw86927_ram_loaded: ram firmware update complete!`）。驱动在 14:55:24.918 就绪，HAL 首次 exec 是 14:55:50.683，晚 26 秒 —— 也不是时序问题。
+
+**这里有个明显的信号错误：HAL 的 exec 早于属性门。** `on boot` 里的 `class_start hal` 会遍历 class hal 内所有服务，**只跳过显式写了 `disabled` 的**（`system/core/init/builtins.cpp:166-181` 的 `StartIfNotDisabled()`，调用点在 `bootable/recovery/etc/init.rc:85-89`）。原来 vibratorfeature 没有 `disabled`，被无条件拉起，在 `vendor.sys.listeners.registered=true` 落定之前就已经跑崩了。已在 `init.recovery.qcom.rc:119` 补 `disabled`，并把 `start` 移进 [5.3](#53-qti-安全服务qseecomd--keymaster--gatekeeper) 那个已验证能拉起 keymaster-4-0 / gatekeeper-1-0 的属性门。
 
 **构成部件的来源**：
 
@@ -206,13 +213,18 @@ F libc : Fatal signal 6 (SIGABRT)
 | HAL 二进制 | `recovery/root/vendor/bin/hw/vendor.xiaomi.hardware.vibratorfeature.service` | stock 预编译，服务声明在 `init.recovery.qcom.rc:119`（`seclabel u:r:recovery:s0`） |
 | AIDL NDK 后端 | `device.mk` 的 `RECOVERY_LIBRARY_SOURCE_FILES` | `android.hardware.vibrator-V1-ndk_platform.so`，需 `NEED_AIDL_NDK_PLATFORM_BACKEND := true`，靠 `relink.sh` 进 recovery 的 `/system/lib64` |
 | Ext 接口库 | `recovery/root/vendor/lib64/vendor.hardware.vibratorfeature.IVibratorExt-V1-ndk_platform.so` | 已随树提供 |
-| 波形库 | `recovery/root/vendor/lib64/vendor.awa.wavelib.so`（631200 B） | **原来缺这个**，HAL 用 `dlopen` + `dlsym(awa_haptics_init / awa_haptics_get_waves_length / awa_haptics_get_waves_data)` 调它 |
+| 波形库 | `recovery/root/vendor/lib64/vendor.awa.wavelib.so`（631200 B） | 已补齐，HAL 用 `dlopen` + `dlsym(awa_haptics_init / awa_haptics_get_waves_length / awa_haptics_get_waves_data)` 调它。日志里 `success to load lib` + `AWA Haptics Library Version: AWAAXA1LPM215I0A` 说明它工作正常 |
+| HAL 的库搜索路径 | `init.recovery.qcom.rc:130` 的 `setenv LD_LIBRARY_PATH` | 与另外四个 QSEE HAL 同一串：`/vendor_lib64` 排在 `/vendor/lib64` 之前。TWRP 中途会用 stock vendor 覆盖 `/vendor`，否则 stock 的 libbinder.so 会压过 recovery 自己的副本，HAL 死在版本化符号错误上 |
 | 内核 ram firmware | `recovery/root/vendor/firmware/aw8697_haptic.bin`（3622 B） | 内核触感驱动的固件，唯一保留的触感固件 |
 | 校准数据 | `/mnt/vendor/persist/haptics/{nv_flag,vib_cal_f0,vib_cal_z,vib_cal_osc}` | HAL 硬编码路径，靠 [5.5](#55-persist-挂载与设置保存) 的 persist 挂载满足 |
 
 **刻意不打包的部分**：stock 里 296 个 `*RTP.bin` + 47 个 `*_rtp.bin` 效果流共约 29 MB，**没有**放进设备树。基础振动（`activate` / `duration`）走内核 awinic 驱动，不需要效果流；没有效果文件时 HAL 只会打印 `load 0 effect` 并使用默认 stream。需要系统命名效果（游戏/铃声触感等）时再按需补对应文件到 `recovery/root/vendor/firmware/` 即可，HAL 的正则是 `([0-9]*)_(.[^_]*)_([0-9]*KHz_)?([S|P]_)?([0-9]{1,}[.][0-9]*_)?RTP.bin`。
 
 **顺带清掉的坑**：`init.recovery.qcom.rc` 里原来的 `onrestart restart vibratorfeature` 指向一个不存在的服务（服务名是 `vibratorfeature-hal-service`），会形成自重启循环，已删除。
+
+**当前状态（d2fe0c4 + 本次改动）**：`disabled` + 属性门 + `setenv LD_LIBRARY_PATH` 三处都已落地，但**还没有实机日志验证过**。仓库里 `log/` 那份是 06-18 的，早于这些提交，所以它里面的 5 秒崩溃循环是预期内的旧行为。刷一次拿到新 log 之前，「已修」这个结论不成立。
+
+上游 `lingqiqi5211/twrp_device_xiaomi_sm8750` 的做法可以作为下一步参考：它把 HAL 放到 `/odm`，用 `recovery/root/system/bin/hal-launch.sh` + init 里 bind 到 `/twrplib` 的方式从 recovery 自己的副本取二进制，绕开 stock vendor 覆盖。这套方案在 munch 还没实施。
 
 ### 5.5 persist 挂载与设置保存
 
@@ -257,7 +269,10 @@ mount none /persist /mnt/vendor/persist bind
 | 症状 | 根因 | 落点 |
 | --- | --- | --- |
 | `Unable to decrypt metadata encryption` | key blob 的 OS/VENDOR patchlevel 与属性不匹配，TA 升级失败（-62 / -38） | `BoardConfig.mk:91-92` |
-| 完全不振动、HAL 每 5 s SIGABRT | `/vendor/lib64/vendor.awa.wavelib.so` 缺件 | 新增 `recovery/root/vendor/lib64/vendor.awa.wavelib.so` |
+| HAL 每 5 s SIGABRT，致命点为 `fail to load lib` | `/vendor/lib64/vendor.awa.wavelib.so` 缺件 | 新增 `recovery/root/vendor/lib64/vendor.awa.wavelib.so` |
+| 同上，但致命点前移到 `RefBase: incStrongRequireStrong()` | 波形目录里一个 `*RTP.bin` 都没有（`load 0 effect`），DynamicEffectDevice 构造效果对象时踩到已释放对象 | **未修复**，见 [5.4](#54-振动-hal) |
+| 同上，且 HAL 的 exec 早于 `vendor.sys.listeners.registered=true` | `class hal` 服务没有 `disabled`，被 `on boot` 的 `class_start hal` 无条件拉起（`builtins.cpp:166-181`） | `init.recovery.qcom.rc:123` 补 `disabled` + `start` 移入属性门 |
+| HAL 可能死在版本化符号错误上 | 没钉 `LD_LIBRARY_PATH`，stock vendor 覆盖 `/vendor` 后它的 libbinder.so 压过 recovery 副本 | `init.recovery.qcom.rc:130` 补 `setenv LD_LIBRARY_PATH` |
 | 设置重启后丢失 | persist 分区没挂，`TW_PERSIST_DIR` 解析不到分区 | `init.recovery.qcom.rc:75-79` |
 | 振动校准读不到（`nv_flag = -1`） | HAL 读 `/mnt/vendor/persist/haptics`，同一分区未挂 | 同上 |
 | 开机卡 10 s、`/firmware` 挂不上 | by-name 链接出现晚于 10 s 的等待 | `init.recovery.qcom.rc:62`（10 → 30） |
@@ -303,7 +318,11 @@ adb shell dmesg | grep -iE 'timed out|aw86927'           # 不应再有 10005ms 
 Unable to decrypt metadata encryption   -> 解密链（见 5.2）
 KeyMint upgraded ... left unchanged     -> TA 运行时升级，正常
 status: -62 / INVALID_ARGUMENT          -> patch level 不匹配
-Fatal signal 6 / fail to load lib       -> HAL 缺件（见 5.4）
+fail to load lib : /vendor/lib64/vendor.awa.wavelib.so  -> HAL 缺件（见 5.4）
+RefBase : incStrongRequireStrong()            -> 波形目录为空，见 5.4
+load 0 effect                                -> 同上，是它的直接前兆
+SELinux : Context u:object_r:... unmapped    -> persist 挂载时的 restorecon 噪音，忽略
+Fatal signal 6                               -> 往上找崩溃点真正的那一行
 Unable to find partition for path       -> TWRP 分区表缺项（见 5.5）
 timed out and took 10005ms              -> by-name 等待过短（见 5.6）
 request_module fs-auto / no fs?         -> fstype auto（见 5.7）
