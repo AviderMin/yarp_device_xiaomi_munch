@@ -50,10 +50,10 @@ BOARD_KERNEL_CMDLINE :=
 BOARD_MKBOOTIMG_ARGS += --header_version 3
 
 # AIDL backends
-# The vibrator HAL (vendor.qti.hardware.vibrator.service, a prebuilt from alioth
-# shipped in the recovery ramdisk at recovery/root/system/bin/) links against the
-# platform-NDK flavor of the AIDL vibrator interface. Soong only generates that
-# flavor when this flag is set
+# The stock Xiaomi vibrator HAL is a prebuilt binary shipped in the recovery
+# ramdisk (recovery/root/vendor/bin/hw/vendor.xiaomi.hardware.vibratorfeature.service)
+# and it links against the platform-NDK flavor of the AIDL vibrator interface.
+# Soong only generates that flavor when this flag is set
 # (build/make/core/soong_config.mk:320 -> GenerateAidlNdkPlatformBackend); without
 # it the HAL dies at startup with
 #   CANNOT LINK EXECUTABLE ...: library android.hardware.vibrator-V1-ndk_platform.so not found

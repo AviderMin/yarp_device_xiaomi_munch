@@ -28,7 +28,7 @@ TWRP 设备树 — 小米 Redmi K40S（代号 **munch**，型号 **22021211RC**�
 | 功能 | 状态 | 说明 |
 | --- | --- | --- |
 | FBE metadata 解密（/data 挂载） | ✅ 已实机验证 | 见 [5.2](#52-fbe-元数据解密) |
-| 振动 | 🔶 修复待验证 | 改用 QTI vibrator HAL（alioth）替换 crash-loop 的 Xiaomi vibratorfeature HAL，AIDL 实例 `IVibrator/default`，见 [5.4](#54-振动-hal) |
+| 振动 | 🔶 兼容修复待验证 | 已定位旧 HAL 的裸指针 Thread 与 Android 16 强引用检查冲突，新增专用 LD_PRELOAD 兼容库，见 [5.4](#54-振动-hal) |
 | TWRP 设置保存 | ✅ 已修，待刷机复验 | persist 分区改挂 `/persist` 再 bind，见 [5.5](#55-persist-挂载与设置保存) |
 | `/firmware`（modem）挂载 | ✅ 已修，待刷机复验 | `wait` 10 s → 30 s，见 [5.6](#56-firmwaremodem-与触摸固件延迟) |
 | USB OTG | ✅ 已修，需插盘验证 | fstype `auto` → `vfat`，见 [5.7](#57-usb-otg) |
@@ -222,9 +222,7 @@ F libc : Fatal signal 6 (SIGABRT), code -1 (SI_QUEUE)
 
 **顺带清掉的坑**：`init.recovery.qcom.rc` 里原来的 `onrestart restart vibratorfeature` 指向一个不存在的服务（服务名是 `vibratorfeature-hal-service`），会形成自重启循环，已删除。
 
-**设备树修复（待编译与实机验证）**：改用 Qualcomm QTI vibrator HAL（来自 alioth 的预编译，参考 ofrp_device_xiaomi_munch commit 50bf383）整体替换原来的 Xiaomi `vibratorfeature` HAL。原 HAL 先撞 Android 16 的 `incStrongRequireStrong` 裸指针 Thread 检查，补上 LD_PRELOAD 兼容库后又因 `IVibrator/vibratorfeature` 声明在 `/vendor/etc/vintf/`（recovery 的 servicemanager 只读 `/system/etc/vintf/`，见 `system/libvintf/VintfObjectRecovery.cpp:48-69`）而 `AServiceManager_addService` 失败，约每 5 s crash-loop。QTI HAL 是标准 AIDL 服务，两者问题都不存在。
-
-具体改动：新增 `recovery/root/system/bin/vendor.qti.hardware.vibrator.service`、`recovery/root/vendor/lib64/hw/vibrator.default.so`、`libqtivibratoreffect.so`、`vendor.qti.hardware.vibrator.impl.so` 与 VINTF 片段 `recovery/root/vendor/etc/vintf/manifest/vendor.qti.hardware.vibrator.service.xml`（`type="device"`、`format="aidl"`、`IVibrator/default`，沿用参考位置不做挪位）；`init.recovery.qcom.rc` 新增 `vendor.qti.vibrator` 服务并在原属性门启动，旧 `vibratorfeature-hal-service` 与 LD_PRELOAD 行已注释保留以便回退；`device.mk` 的 `TW_SUPPORT_INPUT_AIDL_HAPTICS_FQNAME` 改为 `"IVibrator/default"`，并从打包列表移除不再使用的 `libmunch_vibrator_compat.so`（`vibrator/` 源码目录保留未删）。依赖已核对：4 个 blob 的 `NEEDED` 全部由现有 recovery 库满足，无需新增系统库。验证标准：`getprop init.svc.vendor.qti.vibrator` 持续 `running`，`service list | grep android.hardware.vibrator` 见 `IVibrator/default`，logcat 无 `Check failed`/`SIGABRT`，TWRP 内触摸有振动反馈。
+**设备树修复（待编译与实机验证）**：新增 `vibrator/ThreadCompat.cpp` 与 `vibrator/Android.bp`，生成 `libmunch_vibrator_compat.so`。`device.mk` 通过 recovery relink 将库打包到 `/system/lib64`，只有振动服务设置 `LD_PRELOAD`。兼容库拦截 arm64 符号 `_ZN7android6Thread3runEPKcim`，仅当计数为 `1 << 28` 时建立一次 legacy owner，再通过 `dlsym(RTLD_NEXT, ...)` 调原函数；不修改全局 RefBase 检查、不接管其他进程。legacy owner 保留至 HAL 进程结束，避免线程退出时删除 HAL 仍用裸指针持有的对象；这是一项针对旧 HAL 的进程生命周期兼容措施，不是通用引用计数修复。解密和设置保存已由维护者确认正常，本次不改相关配置。
 
 上游 `lingqiqi5211/twrp_device_xiaomi_sm8750` 的做法可以作为下一步参考：它把 HAL 放到 `/odm`，用 `recovery/root/system/bin/hal-launch.sh` + init 里 bind 到 `/twrplib` 的方式从 recovery 自己的副本取二进制，绕开 stock vendor 覆盖。这套方案在 munch 还没实施。
 

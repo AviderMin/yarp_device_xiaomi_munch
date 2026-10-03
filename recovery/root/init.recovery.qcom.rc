@@ -116,23 +116,23 @@ on fs
     chmod 0666  /sys/bus/i2c/drivers/aw8697_haptic/5-005a/custom_wave
     chmod 0666  /sys/bus/i2c/drivers/awinic_haptic/5-005a/custom_wave
 
-# Qualcomm QTI vibrator HAL (from alioth, replaces the crash-looping Xiaomi
-# vibratorfeature HAL). Registers android.hardware.vibrator.IVibrator/default.
-# Runs the standard AIDL vibrator service; no Thread::run interposer needed.
-service vendor.qti.vibrator /system/bin/vendor.qti.hardware.vibrator.service
+service vibratorfeature-hal-service /vendor/bin/hw/vendor.xiaomi.hardware.vibratorfeature.service
     class hal
     user system
     group system input
+    # The QSEE-backed HALs below (qseecomd, keymasterd, keymaster-4-0,
+    # gatekeeper-1-0) all pin the same search path, and it deliberately puts
+    # the ramdisk's own /vendor_lib64 bind ahead of /vendor/lib64. TWRP mounts
+    # the real stock vendor partition over /vendor later in the boot, so
+    # without this line the stock libraries win the search and a HAL started
+    # then can die on a versioned-symbol error against the binder copy the
+    # recovery image itself pulls in. The vibrator HAL was the one service
+    # here that had no setenv at all; give it the same one as its neighbours.
     setenv LD_LIBRARY_PATH /vendor_lib64:/vendor_lib64/hw:/vendor/lib64:/vendor/lib64/hw:/system/lib64:/sbin
+    # Only this legacy HAL needs the Thread::run ownership interposer.
+    setenv LD_PRELOAD /system/lib64/libmunch_vibrator_compat.so
     disabled
     seclabel u:r:recovery:s0
-
-# Former Xiaomi vibratorfeature HAL: crash-loops on AServiceManager_addService
-# (its IVibrator/vibratorfeature declaration is in /vendor/etc/vintf which the
-# recovery servicemanager never reads). Replaced by vendor.qti.vibrator above.
-# Kept commented for reference/rollback.
-# service vibratorfeature-hal-service /vendor/bin/hw/vendor.xiaomi.hardware.vibratorfeature.service
-# (old xiaomi service body removed with the service above)
 
 # Qualcomm secure services. Recovery never imports the stock vendor init scripts
 # (stock/vendor/etc/init/*.rc), so the services the stock vendor used to declare
@@ -182,8 +182,9 @@ on property:hwservicemanager.ready=true && property:vendor.sys.listeners.registe
     start gatekeeper-1-0
     start keymaster-4-0
     start vendor.keymasterd
-    # QTI replacement needs no Thread interposer; gate kept for ordering.
-    start vendor.qti.vibrator
+    # The QSEE gate is retained for startup ordering, not as a fix for
+    # DynamicEffectDevice: its raw Thread owner is repaired by LD_PRELOAD.
+    start vibratorfeature-hal-service
 
 on post-fs
     start boot-hal-1-1
