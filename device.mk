@@ -63,18 +63,20 @@ TARGET_RECOVERY_DEVICE_MODULES += \
 RECOVERY_LIBRARY_SOURCE_FILES += \
     $(TARGET_OUT_SHARED_LIBRARIES)/libion.so
 
-# Platform-NDK vibrator backend for the prebuilt Xiaomi vibratorfeature HAL
-# (see NEED_AIDL_NDK_PLATFORM_BACKEND in BoardConfig.mk). Recovery only searches
-# /system/lib64:/vendor/lib64/hw (bootable/recovery/etc/init.rc:30), so the
-# library has to end up in the recovery image's /system/lib64, which is exactly
-# what RECOVERY_LIBRARY_SOURCE_FILES does
+# Platform-NDK vibrator backend for the QTI vibrator HAL
+# (vendor.qti.hardware.vibrator.service, see NEED_AIDL_NDK_PLATFORM_BACKEND in
+# BoardConfig.mk). Recovery only searches /system/lib64:/vendor/lib64/hw
+# (bootable/recovery/etc/init.rc:30), so the library has to end up in the
+# recovery image's /system/lib64, which is exactly what
+# RECOVERY_LIBRARY_SOURCE_FILES does
 # (bootable/recovery/prebuilt/Android.mk:386-389 calls relink.sh). Listing the
 # path also makes relink_libraries require the module, so it is built and
 # installed even when only the recovery image is built.
-# libmunch_vibrator_compat is preloaded by the vibrator service only.
+# The old Xiaomi vibratorfeature HAL and its libmunch_vibrator_compat.so
+# Thread::run interposer are no longer used (service commented out in
+# init.recovery.qcom.rc), so the compat library is dropped from the image.
 RECOVERY_LIBRARY_SOURCE_FILES += \
-    $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator-V1-ndk_platform.so \
-    $(TARGET_OUT_SHARED_LIBRARIES)/libmunch_vibrator_compat.so
+    $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator-V1-ndk_platform.so
 
 # Crypto
 TW_INCLUDE_CRYPTO := true
@@ -95,5 +97,5 @@ PLATFORM_VERSION := 99.87.36
 
 # AIDL Vibrator
 TW_SUPPORT_INPUT_AIDL_HAPTICS := true
-TW_SUPPORT_INPUT_AIDL_HAPTICS_FQNAME := "IVibrator/vibratorfeature"
+TW_SUPPORT_INPUT_AIDL_HAPTICS_FQNAME := "IVibrator/default"
 
