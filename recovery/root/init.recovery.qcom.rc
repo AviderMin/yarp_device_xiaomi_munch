@@ -64,14 +64,13 @@ on fs
     mount vfat /dev/block/bootdevice/by-name/modem /firmware ro shortname=lower
 
     # TWRP stores its settings in TW_PERSIST_DIR, /mnt/vendor/persist/TWRP
-    # (bootable/recovery/variables.h:24-25), and the vibrator HAL reads its
-    # calibration from /mnt/vendor/persist/haptics. TWRP unmounts the mount
-    # points it manages while starting up and resolves a partition from the
-    # root path segment alone, so it cannot hold /mnt/vendor/persist itself.
-    # Mount the real partition at /persist (the path TWRP knows from
-    # twrp.flags) and bind /mnt/vendor/persist onto it; a bind is not one of
-    # TWRP's own mounts, so Is_Mounted_By_Path() reports it as mounted and
-    # TWRP leaves it alone. Same construct as upstream sm8750 (aaa74ed).
+    # (bootable/recovery/variables.h:24-25). TWRP unmounts the mount points it
+    # manages while starting up and resolves a partition from the root path
+    # segment alone, so it cannot hold /mnt/vendor/persist itself. Mount the
+    # real partition at /persist (the path TWRP knows from twrp.flags) and
+    # bind /mnt/vendor/persist onto it; a bind is not one of TWRP's own
+    # mounts, so Is_Mounted_By_Path() reports it as mounted and TWRP leaves
+    # it alone. Same construct as upstream sm8750 (aaa74ed).
     mkdir /mnt/vendor 0775 shell system
     mkdir /mnt/vendor/persist 0775 shell system
     wait /dev/block/bootdevice/by-name/persist 10
@@ -91,48 +90,7 @@ on fs
     wait /dev/block/bootdevice/by-name/ssd 10
     start vendor.qseecomd
 
-    # vibrator
-    chown system system /sys/bus/i2c/drivers/aw8697_haptic/2-005a/f0_save
-    chown system system /sys/bus/i2c/drivers/aw8697_haptic/2-005a/osc_save
-    chown system system /sys/bus/i2c/drivers/aw8697_haptic/3-005a/osc_save
-    chown system system /sys/bus/i2c/drivers/aw8697_haptic/2-005a/custom_wave
-    chmod 0666  /sys/bus/i2c/drivers/aw8697_haptic/2-005a/custom_wave
-    chown system system /sys/bus/i2c/drivers/aw8697_haptic/2-005a/custom_wave
-    chmod 0666  /sys/bus/i2c/drivers/aw8697_haptic/2-005a/custom_wave
-    chown system system /sys/bus/i2c/drivers/aw8697_haptic/3-005a/custom_wave
-    chmod 0666  /sys/bus/i2c/drivers/aw8697_haptic/3-005a/custom_wave
-    chmod 0666 /sys/class/qcom-haptics/lra_calibration
-    chown system system /sys/bus/i2c/drivers/aw8697_haptic/0-005a/custom_wave
-    chmod 0666  /sys/bus/i2c/drivers/aw8697_haptic/0-005a/custom_wave
-    chmod 0666 /sys/class/qcom-haptics/lra_impedance
-    chown system system /sys/bus/i2c/drivers/awinic_haptic/3-005a/f0_save
-    chown system system /sys/bus/i2c/drivers/awinic_haptic/3-005a/osc_save
-    chown system system /sys/bus/i2c/drivers/awinic_haptic/3-005a/custom_wave
-    chmod 0666  /sys/bus/i2c/drivers/awinic_haptic/3-005a/custom_wave
-    chown system system /sys/bus/i2c/drivers/awinic_haptic/3-005a/f0_value
-    chmod 0666  /sys/bus/i2c/drivers/awinic_haptic/3-005a/f0_value
-    chown system system /sys/bus/i2c/drivers/awinic_haptic/3-005a/nv_flag
-    chmod 0666  /sys/bus/i2c/drivers/awinic_haptic/3-005a/nv_flag
-    chmod 0666  /sys/bus/i2c/drivers/aw8697_haptic/5-005a/custom_wave
-    chmod 0666  /sys/bus/i2c/drivers/awinic_haptic/5-005a/custom_wave
 
-service vibratorfeature-hal-service /vendor/bin/hw/vendor.xiaomi.hardware.vibratorfeature.service
-    class hal
-    user system
-    group system input
-    # The QSEE-backed HALs below (qseecomd, keymasterd, keymaster-4-0,
-    # gatekeeper-1-0) all pin the same search path, and it deliberately puts
-    # the ramdisk's own /vendor_lib64 bind ahead of /vendor/lib64. TWRP mounts
-    # the real stock vendor partition over /vendor later in the boot, so
-    # without this line the stock libraries win the search and a HAL started
-    # then can die on a versioned-symbol error against the binder copy the
-    # recovery image itself pulls in. The vibrator HAL was the one service
-    # here that had no setenv at all; give it the same one as its neighbours.
-    setenv LD_LIBRARY_PATH /vendor_lib64:/vendor_lib64/hw:/vendor/lib64:/vendor/lib64/hw:/system/lib64:/sbin
-    # Only this legacy HAL needs the Thread::run ownership interposer.
-    setenv LD_PRELOAD /system/lib64/libmunch_vibrator_compat.so
-    disabled
-    seclabel u:r:recovery:s0
 
 # Qualcomm secure services. Recovery never imports the stock vendor init scripts
 # (stock/vendor/etc/init/*.rc), so the services the stock vendor used to declare
@@ -182,9 +140,7 @@ on property:hwservicemanager.ready=true && property:vendor.sys.listeners.registe
     start gatekeeper-1-0
     start keymaster-4-0
     start vendor.keymasterd
-    # The QSEE gate is retained for startup ordering, not as a fix for
-    # DynamicEffectDevice: its raw Thread owner is repaired by LD_PRELOAD.
-    start vibratorfeature-hal-service
+
 
 on post-fs
     start boot-hal-1-1
