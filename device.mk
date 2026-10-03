@@ -71,8 +71,10 @@ RECOVERY_LIBRARY_SOURCE_FILES += \
 # (bootable/recovery/prebuilt/Android.mk:386-389 calls relink.sh). Listing the
 # path also makes relink_libraries require the module, so it is built and
 # installed even when only the recovery image is built.
+# libmunch_vibrator_compat is preloaded by the vibrator service only.
 RECOVERY_LIBRARY_SOURCE_FILES += \
-    $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator-V1-ndk_platform.so
+    $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator-V1-ndk_platform.so \
+    $(TARGET_OUT_SHARED_LIBRARIES)/libmunch_vibrator_compat.so
 
 # Crypto
 TW_INCLUDE_CRYPTO := true

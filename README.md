@@ -28,7 +28,7 @@ TWRP 设备树 — 小米 Redmi K40S（代号 **munch**，型号 **22021211RC**�
 | 功能 | 状态 | 说明 |
 | --- | --- | --- |
 | FBE metadata 解密（/data 挂载） | ✅ 已实机验证 | 见 [5.2](#52-fbe-元数据解密) |
-| 振动 | 🔶 修复进行中 | wavelib 缺件已补，但致命点已前移到空效果表导致的 `RefBase` abort；三处改动待刷机验证，见 [5.4](#54-振动-hal) |
+| 振动 | 🔶 兼容修复待验证 | 已定位旧 HAL 的裸指针 Thread 与 Android 16 强引用检查冲突，新增专用 LD_PRELOAD 兼容库，见 [5.4](#54-振动-hal) |
 | TWRP 设置保存 | ✅ 已修，待刷机复验 | persist 分区改挂 `/persist` 再 bind，见 [5.5](#55-persist-挂载与设置保存) |
 | `/firmware`（modem）挂载 | ✅ 已修，待刷机复验 | `wait` 10 s → 30 s，见 [5.6](#56-firmwaremodem-与触摸固件延迟) |
 | USB OTG | ✅ 已修，需插盘验证 | fstype `auto` → `vfat`，见 [5.7](#57-usb-otg) |
@@ -200,7 +200,7 @@ F RefBase : incStrongRequireStrong() called on 0x... which isn't already owned  
 F libc : Fatal signal 6 (SIGABRT), code -1 (SI_QUEUE)
 ```
 
-**致命点已经从「缺 wavelib」前移到「效果表为空」。** `RefBase` 是 Android 的引用计数基类，它主动 abort 说明代码对一个引用计数已归零的对象调了 `incStrong()`。`load 0 effect` 是直接证据：HAL 遍历波形目录，只看到 `.`、`..` 和内核 RAM 固件 `aw8697_haptic.bin`，一个 `*RTP.bin` 都没有，构造 DynamicEffectDevice 的效果对象时踩到已释放对象。
+**根因修正：旧 HAL 的 Thread 所有权与 Android 16 libutils 不兼容。** `load 0 effect` 和 `custom_wave_id: 197` 是崩溃前的日志，不足以证明效果表为空或驱动未就绪造成 abort。只读反汇编显示：HAL 在 `0xc038` 分配 Thread 子类，`0xc048` 调构造函数，`0xc04c` 保存裸指针，`0xc06c` 直接调用虚表里的 `Thread::run`，中间没有建立强引用。Android 16 `system/core/libutils/Threads.cpp:685` 使用 `sp<Thread>::fromExisting(this)`；它会调用 `incStrongRequireStrong()`，对初始计数 `1 << 28` 也会 abort，并非只能说明对象已释放。
 
 内核侧一直是好的（`[haptic_hv]aw86927 detected`、`aw86927_ram_loaded: ram firmware update complete!`）。驱动在 14:55:24.918 就绪，HAL 首次 exec 是 14:55:50.683，晚 26 秒 —— 也不是时序问题。
 
@@ -222,7 +222,7 @@ F libc : Fatal signal 6 (SIGABRT), code -1 (SI_QUEUE)
 
 **顺带清掉的坑**：`init.recovery.qcom.rc` 里原来的 `onrestart restart vibratorfeature` 指向一个不存在的服务（服务名是 `vibratorfeature-hal-service`），会形成自重启循环，已删除。
 
-**当前状态（d2fe0c4 + 本次改动）**：`disabled` + 属性门 + `setenv LD_LIBRARY_PATH` 三处都已落地，但**还没有实机日志验证过**。仓库里 `log/` 那份是 06-18 的，早于这些提交，所以它里面的 5 秒崩溃循环是预期内的旧行为。刷一次拿到新 log 之前，「已修」这个结论不成立。
+**设备树修复（待编译与实机验证）**：新增 `vibrator/ThreadCompat.cpp` 与 `vibrator/Android.bp`，生成 `libmunch_vibrator_compat.so`。`device.mk` 通过 recovery relink 将库打包到 `/system/lib64`，只有振动服务设置 `LD_PRELOAD`。兼容库拦截 arm64 符号 `_ZN7android6Thread3runEPKcim`，仅当计数为 `1 << 28` 时建立一次 legacy owner，再通过 `dlsym(RTLD_NEXT, ...)` 调原函数；不修改全局 RefBase 检查、不接管其他进程。legacy owner 保留至 HAL 进程结束，避免线程退出时删除 HAL 仍用裸指针持有的对象；这是一项针对旧 HAL 的进程生命周期兼容措施，不是通用引用计数修复。解密和设置保存已由维护者确认正常，本次不改相关配置。
 
 上游 `lingqiqi5211/twrp_device_xiaomi_sm8750` 的做法可以作为下一步参考：它把 HAL 放到 `/odm`，用 `recovery/root/system/bin/hal-launch.sh` + init 里 bind 到 `/twrplib` 的方式从 recovery 自己的副本取二进制，绕开 stock vendor 覆盖。这套方案在 munch 还没实施。
 
@@ -270,7 +270,7 @@ mount none /persist /mnt/vendor/persist bind
 | --- | --- | --- |
 | `Unable to decrypt metadata encryption` | key blob 的 OS/VENDOR patchlevel 与属性不匹配，TA 升级失败（-62 / -38） | `BoardConfig.mk:91-92` |
 | HAL 每 5 s SIGABRT，致命点为 `fail to load lib` | `/vendor/lib64/vendor.awa.wavelib.so` 缺件 | 新增 `recovery/root/vendor/lib64/vendor.awa.wavelib.so` |
-| 同上，但致命点前移到 `RefBase: incStrongRequireStrong()` | 波形目录里一个 `*RTP.bin` 都没有（`load 0 effect`），DynamicEffectDevice 构造效果对象时踩到已释放对象 | **未修复**，见 [5.4](#54-振动-hal) |
+| HAL `RefBase: incStrongRequireStrong()` abort | Thread 子类裸指针直接调用 run，Android 16 要求已有强引用 | `vibrator/ThreadCompat.cpp` + 振动服务专用 `LD_PRELOAD`，待实机验证 |
 | 同上，且 HAL 的 exec 早于 `vendor.sys.listeners.registered=true` | `class hal` 服务没有 `disabled`，被 `on boot` 的 `class_start hal` 无条件拉起（`builtins.cpp:166-181`） | `init.recovery.qcom.rc:123` 补 `disabled` + `start` 移入属性门 |
 | HAL 可能死在版本化符号错误上 | 没钉 `LD_LIBRARY_PATH`，stock vendor 覆盖 `/vendor` 后它的 libbinder.so 压过 recovery 副本 | `init.recovery.qcom.rc:130` 补 `setenv LD_LIBRARY_PATH` |
 | 设置重启后丢失 | persist 分区没挂，`TW_PERSIST_DIR` 解析不到分区 | `init.recovery.qcom.rc:75-79` |
@@ -298,7 +298,10 @@ adb shell getprop ro.vendor.build.security_patch         # 期望 2099-12-31
 adb shell mount | grep -E 'persist|firmware|usb_otg'     # 期望看到 /persist 与 /mnt/vendor/persist
 adb shell ls -l /persist/TWRP/.twrp_settings             # 设置文件应存在
 adb shell ls /vendor/firmware /vendor/lib64/vendor.awa.wavelib.so
-adb shell getprop init.svc.vibratorfeature-hal-service   # 期望 running
+adb shell getprop init.svc.vibratorfeature-hal-service   # 期望持续 running，不能只采样一次
+adb shell ls -l /system/lib64/libmunch_vibrator_compat.so
+adb logcat -d -s MunchVibratorCompat                     # 期望 Established legacy Thread owner
+adb shell service list | grep android.hardware.vibrator # 期望 IVibrator/vibratorfeature
 adb shell dmesg | grep -iE 'timed out|aw86927'           # 不应再有 10005ms 超时
 ```
 
@@ -319,8 +322,8 @@ Unable to decrypt metadata encryption   -> 解密链（见 5.2）
 KeyMint upgraded ... left unchanged     -> TA 运行时升级，正常
 status: -62 / INVALID_ARGUMENT          -> patch level 不匹配
 fail to load lib : /vendor/lib64/vendor.awa.wavelib.so  -> HAL 缺件（见 5.4）
-RefBase : incStrongRequireStrong()            -> 波形目录为空，见 5.4
-load 0 effect                                -> 同上，是它的直接前兆
+RefBase : incStrongRequireStrong()            -> 检查 Thread 强引用兼容库是否生效，见 5.4
+load 0 effect                                -> 未打包 RTP 效果，不能单独判定崩溃根因
 SELinux : Context u:object_r:... unmapped    -> persist 挂载时的 restorecon 噪音，忽略
 Fatal signal 6                               -> 往上找崩溃点真正的那一行
 Unable to find partition for path       -> TWRP 分区表缺项（见 5.5）

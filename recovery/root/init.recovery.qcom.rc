@@ -129,6 +129,8 @@ service vibratorfeature-hal-service /vendor/bin/hw/vendor.xiaomi.hardware.vibrat
     # recovery image itself pulls in. The vibrator HAL was the one service
     # here that had no setenv at all; give it the same one as its neighbours.
     setenv LD_LIBRARY_PATH /vendor_lib64:/vendor_lib64/hw:/vendor/lib64:/vendor/lib64/hw:/system/lib64:/sbin
+    # Only this legacy HAL needs the Thread::run ownership interposer.
+    setenv LD_PRELOAD /system/lib64/libmunch_vibrator_compat.so
     disabled
     seclabel u:r:recovery:s0
 
@@ -180,19 +182,8 @@ on property:hwservicemanager.ready=true && property:vendor.sys.listeners.registe
     start gatekeeper-1-0
     start keymaster-4-0
     start vendor.keymasterd
-    # The vibrator HAL aborts on RefBase::incStrongRequireStrong() if it is
-    # started before the conditions it reads at construction time are in
-    # place. DynamicEffectDevice reads /sys/bus/i2c/drivers/awinic_haptic/
-    # 3-005a/custom_wave during its first pass and a stale id left on that
-    # node makes it build an effect from an object that is already gone
-    # (logcat: "read custom_wave_id: 197" then
-    # "F RefBase : incStrongRequireStrong() called on 0x... which isn't
-    # already owned"). On boot that node is still being re-initialised by
-    # the awinic driver, whose RAM firmware upload only finishes around
-    # 6.8 s (dmesg: "aw86927_ram_loaded: ram firmware update complete!").
-    # The same gate that brings up the QSEE-backed HALs also guarantees
-    # qseecomd is up and the persist partition -- the vibrator HAL reads its
-    # calibration from /mnt/vendor/persist/haptics -- is mounted and owned.
+    # The QSEE gate is retained for startup ordering, not as a fix for
+    # DynamicEffectDevice: its raw Thread owner is repaired by LD_PRELOAD.
     start vibratorfeature-hal-service
 
 on post-fs
