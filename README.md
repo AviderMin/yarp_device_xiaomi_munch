@@ -248,13 +248,25 @@ mount none /persist /mnt/vendor/persist bind
 
 ### 5.6 /firmware(modem) 与触摸固件延迟
 
-**症状**：`Failed to mount '/firmware' (No such file or directory)`，`Actual block device: ''`，开机被拖 10 s。
+**症状**：`Failed to mount '/firmware' (No such file or directory)`，`Actual block device: ''`；`on fs` 里白等一整个 `wait` 超时（先是 10 s，后来 30 s）。
 
-**原因**：`init.recovery.qcom.rc` 里 `wait /dev/block/bootdevice/by-name/modem 10` 超时。ueventd 的 coldboot 被触摸控制器的固件请求卡住约 10 s（`focaltech_ts_fw.bin`，这个文件**在 9.25 GB 的 stock 转储里根本不存在**，官方系统上同样会失败），晚 LUN 的 by-name 链接实测要 12.2 s 才出现，10 s 的等待必然输掉这个竞态。
+**原因**（用 `log/` 那三份日志复核后推翻了本节原来的结论）：`init.recovery.qcom.rc` 等的是 `/dev/block/bootdevice/by-name/modem`，但**这个节点在本机根本不存在**——`modem` 是 slotselect 分区，真名是 `modem_a` / `modem_b`（`recovery.fstab:63` 的 `/vendor/firmware_mnt` 和 `twrp.flags:20` 的 `/modem` 都带 `slotselect`，正是这个原因）。非后缀的 `by-name/modem` 是 **TWRP 自己**在解析 `/modem` 表项时创建的（`partition.cpp:2970-2973` 先 `unlink` 再 `symlink`；对应 `logcat:2401` 在 10:47:04.519 对 `by-name` 目录的 write 拒绝），而 init 的 `on fs` 远早于 TWRP 启动。所以这个 `wait` 无论给多久都不会成功，只会烧掉整个超时时间。
 
-**修复**：`wait .../by-name/modem 30`（`init.recovery.qcom.rc:62`），给足余量。
+而且 init 的 action 是串行执行的：这次 30 s 的 `wait` 把后面整条链都堵住了——`healthd`(639)、`qseecomd`(634)、TWRP 自己(638) 全都等到 boot 32.33–32.35 s 才启动（`dmesg.log:1967` 的超时在 `[32.301783]`，TWRP 第一条日志在 `10:47:04.351`）。也就是说 **"10 → 30" 并没有修好 `/firmware`，只是把白等从 10 s 变成了 30 s。**
 
-注意触摸本身是好的：固件请求走异步 sysfs fallback，probe 在 0.9–1.36 s 就完成了，只是那次失败要等 10 s 才超时。**不要**去伪造 `focaltech_ts_fw.bin` 放进设备树，官方固件里没有这个文件。
+触摸控制器的固件请求（`focaltech_ts_fw.bin`，这个文件**在 9.25 GB 的 stock 转储里根本不存在**，官方系统上同样会失败）确实会拖住 ueventd 的 coldboot（这次 `dmesg.log:1991` 记的是 `took 30047ms`），但那是另一回事，不是 `/firmware` 挂不上的原因。
+
+**修复**：等真正的节点。`ro.boot.slot_suffix` 在 init 第二阶段早期就有了（本机日志里是 `_a`），超时放宽到 60 s 当纯余量（节点一出现 `wait` 就返回，不会真的等满）：
+
+```
+wait /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} 60
+mkdir /firmware 0755 root root
+mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro shortname=lower
+```
+
+同时给 `twrp.flags:33` 的 `/firmware` 补上 `slotselect`，让 TWRP 自己就能解析，不必依赖它自建的链接（否则开机还会弹一次 `Failed to mount '/firmware'`，见 `recovery.log:177`）。
+
+**一个必须知道的连带坑**：`focaltech_ts_fw.bin` 请求失败后，FTS 驱动会回退到**内核内置固件**；如果内置版本与面板里的不一致，驱动会**整片擦写重刷**面板——这次是 `fw version in tp:28, host:21`，boot 32.45→46.56 s 共 14.1 s 面板都停在 bootloader 里，完全没有触摸，正好是"刚进 recovery 不能触摸"，等约 15 s 会自己恢复（恢复后的点按带 80 ms 触感，见 `logcat:3918` 起的 50 条 `duration = 80`）。要根治就把 `prebuilt/Image` 换成与所装 ROM 匹配的内核（当前是 `4.19.325-NijikaX-v2.9` KernelSU）。**不要**去伪造 `focaltech_ts_fw.bin` 放进设备树：它会被真的写进面板。
 
 ### 5.7 USB OTG
 
@@ -275,14 +287,14 @@ mount none /persist /mnt/vendor/persist bind
 | HAL 可能死在版本化符号错误上 | 没钉 `LD_LIBRARY_PATH`，stock vendor 覆盖 `/vendor` 后它的 libbinder.so 压过 recovery 副本 | `init.recovery.qcom.rc:130` 补 `setenv LD_LIBRARY_PATH` |
 | 设置重启后丢失 | persist 分区没挂，`TW_PERSIST_DIR` 解析不到分区 | `init.recovery.qcom.rc:75-79` |
 | 振动校准读不到（`nv_flag = -1`） | HAL 读 `/mnt/vendor/persist/haptics`，同一分区未挂 | 同上 |
-| 开机卡 10 s、`/firmware` 挂不上 | by-name 链接出现晚于 10 s 的等待 | `init.recovery.qcom.rc:62`（10 → 30） |
+| 开机白等一整个超时、`/firmware` 挂不上 | 等的 `by-name/modem` 不是真实节点（真名 `modem_a`），TWRP 自建的链接来得太晚 | `init.recovery.qcom.rc:62-64`（改 `modem${ro.boot.slot_suffix}`、超时 60）、`twrp.flags:33`（补 `slotselect`） |
 | `/usb_otg` 挂载失败 | fstype `auto` 在无介质时直达 `mount(2)` | `twrp.flags:47`（auto → vfat） |
 | HAL 自重启循环 | `onrestart restart vibratorfeature` 指向不存在的服务 | `init.recovery.qcom.rc`（已删） |
 
 ## 7. 已知问题与限制
 
 * **FDE 不支持**：TWRP 16.0 上游明确 `FDE decryption will not be supported in this branch`，本树只保留 FBE 路线；旧的 `qcom_decrypt` / `qcom_decrypt_fbe` 包与 `init.recovery.qcom_decrypt.rc` 均已移除。
-* **触摸固件请求必然失败**：`focaltech_ts_fw.bin` 在 stock 中不存在（见 [5.6](#56-firmwaremodem-与触摸固件延迟)），只能等它超时，表现为开机多等约 10 s 的 ueventd；已通过加大 `wait` 避免连带影响 `/firmware`。
+* **触摸固件请求必然失败**：`focaltech_ts_fw.bin` 在 stock 中不存在（见 [5.6](#56-firmwaremodem-与触摸固件延迟)），只能等它超时，表现为 ueventd coldboot 被拖约 30 s（`dmesg.log:1991` `took 30047ms`）。更要紧的是驱动回退到内核内置固件后可能整片重刷面板：内置版本与面板不一致时，进 recovery 后会有约 14 s 完全无触摸（这次 tp:28 / host:21，`dmesg.log:1999`）；换用与所装 ROM 匹配的内核可消除。
 * **`/sys/class/leds/vibrator/activate` 不存在**：HAL 会打印 `errno = 2` 后回退，不影响基础振动（awinic 驱动节点在 `/sys/bus/i2c/drivers/awinic_haptic/`，已在 rc 里放开权限）。
 * **不带命名振动效果**：见 [5.4](#54-振动-hal)，需要时按需补 `*RTP.bin`。
 * **无 AIDL health HAL**：TWRP 回退到 HIDL，日志里有对应提示，属正常噪音。

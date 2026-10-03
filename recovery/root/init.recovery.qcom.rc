@@ -54,14 +54,21 @@ on fs
     # mount below still serves the remaining TAs (widevine etc.) and the
     # kernel firmware loader (force_sysfs_fallback).
     write /proc/sys/kernel/firmware_config/force_sysfs_fallback 1
-    # ueventd's coldboot is held up ~10 s by the touch controller's firmware
-    # request (focaltech_ts_fw.bin, which does not exist anywhere in the stock
-    # dump either), and the by-name links of the late LUNs (sde -> modem) only
-    # appear afterwards (measured 12.2 s). The old 10 s wait always lost that
-    # race, so /firmware never mounted; 30 s covers it with headroom.
-    wait /dev/block/bootdevice/by-name/modem 30
+    # 'modem' is a slot-selected partition: the real nodes are modem_a /
+    # modem_b, and there is no plain by-name/modem node. recovery.fstab:63
+    # (/vendor/firmware_mnt) and twrp.flags:20 (/modem) both carry slotselect
+    # for exactly that reason. The non-suffixed by-name/modem link is created
+    # by TWRP itself while parsing /modem (partition.cpp:2970-2973, the by-name
+    # dir write at 10:47:04.519), which happens long after init's 'on fs'. So
+    # this wait could never succeed -- it just burned the whole timeout and,
+    # because init actions are serial, blocked everything queued behind it:
+    # healthd (pid 639), qseecomd (634) and TWRP itself (638) only started at
+    # boot 32.33-32.35 s. Wait for the real node instead; ro.boot.slot_suffix
+    # is available since second-stage init (it is "_a" here). 60 s is pure
+    # headroom -- wait returns as soon as the node appears.
+    wait /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} 60
     mkdir /firmware 0755 root root
-    mount vfat /dev/block/bootdevice/by-name/modem /firmware ro shortname=lower
+    mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro shortname=lower
 
     # TWRP stores its settings in TW_PERSIST_DIR, /mnt/vendor/persist/TWRP
     # (bootable/recovery/variables.h:24-25). TWRP unmounts the mount points it

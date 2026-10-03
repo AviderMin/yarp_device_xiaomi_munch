@@ -30,7 +30,7 @@
 # Userdata & metadata (FBE / metadata encryption, wrapped keys via keymaster)
 /data            auto    /dev/block/bootdevice/by-name/userdata             flags=display="Data";storage;wipeingui;backup=1;fileencryption=aes-256-xts:aes-256-cts:v2+inlinecrypt_optimized+wrappedkey_v0,metadata_encryption=aes-256-xts:wrappedkey_v0,keydirectory=/metadata/vold/metadata_encryption
 /metadata         ext4    /dev/block/bootdevice/by-name/metadata               flags=display="Metadata";wrappedkey;backup=0;wipeingui
-/firmware         vfat    /dev/block/bootdevice/by-name/modem                    flags=display="Firmware";mounttodecrypt;fsflags="ro,shortname=lower"
+/firmware         vfat    /dev/block/bootdevice/by-name/modem                    flags=display="Firmware";mounttodecrypt;slotselect;fsflags="ro,shortname=lower"
 
 # Persistent Firmware & Properties
 /persist            ext4    /dev/block/bootdevice/by-name/persist                flags=display="Persist"
