@@ -70,13 +70,23 @@ TW_INCLUDE_FBE_METADATA_DECRYPT := true
 BOARD_USES_METADATA_PARTITION := true
 
 # Platform
-# Android 16 owns the security-patch / last-stable values through release flags:
-# RELEASE_PLATFORM_SECURITY_PATCH and RELEASE_PLATFORM_VERSION_LAST_STABLE are
-# .KATI_READONLY build flags (build/release/flag_values/<branch>/*.textproto), and
-# setting PLATFORM_SECURITY_PATCH / PLATFORM_VERSION_LAST_STABLE directly trips
-# the $(error) guards in build/make/core/version_util.mk:55 / :113. The
-# VENDOR_SECURITY_PATCH / BOOT_SECURITY_PATCH pair is derived from
-# PLATFORM_SECURITY_PATCH by the build system. Only PLATFORM_VERSION itself is
-# still overridable from a device tree.
+# Version/patch-level override strategy (see README 5.2 for the full story):
+# - The effective assignments live in BoardConfig.mk's Encryption section:
+#   PLATFORM_SECURITY_PATCH / VENDOR_SECURITY_PATCH there are what end up in
+#   ro.build.version.security_patch / ro.vendor.build.security_patch
+#   (observed in the boot logs of a build made from this tree).
+# - Upstream AOSP (android-16.0.0_r1, the tag this TWRP manifest pins) does
+#   guard PLATFORM_SECURITY_PATCH / PLATFORM_VERSION_LAST_STABLE with
+#   ifdef+$(error) and .KATI_READONLY in build/make/core/version_util.mk, but
+#   in the TWRP twrp-16.0 build the direct device-tree assignments above are
+#   what take effect; do not assume the upstream guard behaviour transfers
+#   when the manifest or branch changes - re-verify with getprop after a
+#   full build.
+# - VENDOR_SECURITY_PATCH is written out as ro.vendor.build.security_patch by
+#   build/make/core/sysprop_config.mk; BoardConfig.mk pins it to the same
+#   far-future date so the derived value cannot drift.
+# - PLATFORM_VERSION := 99.87.36 below only feeds build props (e.g.
+#   ro.build.version.release) for the Keymaster patch-level comparison; it is
+#   a build-time value, not a statement about the device.
 PLATFORM_VERSION := 99.87.36
 

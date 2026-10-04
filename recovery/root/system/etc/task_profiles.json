@@ -49,11 +49,6 @@
       "Name": "UClampLatencySensitive",
       "Controller": "cpu",
       "File": "cpu.uclamp.latency_sensitive"
-    },
-    {
-      "Name": "FreezerState",
-      "Controller": "freezer",
-      "File": "frozen/freezer.state"
     }
   ],
 
@@ -67,32 +62,6 @@
           {
             "Controller": "cpu",
             "Path": "background"
-          }
-        }
-      ]
-    },
-    {
-      "Name": "FreezerFrozen",
-      "Actions": [
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "FreezerState",
-            "Value": "FROZEN"
-          }
-        }
-      ]
-    },
-    {
-      "Name": "FreezerThawed",
-      "Actions": [
-        {
-          "Name": "SetAttribute",
-          "Params":
-          {
-            "Name": "FreezerState",
-            "Value": "THAWED"
           }
         }
       ]
@@ -587,29 +556,11 @@
 
     {
       "Name": "PerfBoost",
-      "Actions": [
-        {
-          "Name": "SetClamps",
-          "Params":
-          {
-            "Boost": "50%",
-            "Clamp": "0"
-          }
-        }
-      ]
+      "Actions": []
     },
     {
       "Name": "PerfClamp",
-      "Actions": [
-        {
-          "Name": "SetClamps",
-          "Params":
-          {
-            "Boost": "0",
-            "Clamp": "30%"
-          }
-        }
-      ]
+      "Actions": []
     },
 
     {

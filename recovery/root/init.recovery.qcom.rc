@@ -71,11 +71,12 @@ on fs
     mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware ro shortname=lower
 
     # TWRP stores its settings in TW_PERSIST_DIR, /mnt/vendor/persist/TWRP
-    # (bootable/recovery/variables.h:24-25). TWRP unmounts the mount points it
+    # (bootable/recovery/variables.h). TWRP unmounts the mount points it
     # manages while starting up and resolves a partition from the root path
     # segment alone, so it cannot hold /mnt/vendor/persist itself. Mount the
     # real partition at /persist (the path TWRP knows from twrp.flags) and
-    # bind /mnt/vendor/persist onto it; a bind is not one of TWRP's own
+    # bind /mnt/vendor/persist onto it. The bind is created here in 'on fs',
+    # long before the TWRP process starts, and it is not one of TWRP's own
     # mounts, so Is_Mounted_By_Path() reports it as mounted and TWRP leaves
     # it alone. Same construct as upstream sm8750 (aaa74ed).
     mkdir /mnt/vendor 0775 shell system
@@ -102,8 +103,9 @@ on fs
 # Qualcomm secure services. Recovery never imports the stock vendor init scripts
 # (stock/vendor/etc/init/*.rc), so the services the stock vendor used to declare
 # have to be defined here. The binaries are prebuilts shipped inside the recovery
-# ramdisk at /system/bin; their HIDL/AIDL libraries are already pulled into the
-# recovery image by bootable/recovery/prebuilt/Android.mk.
+# ramdisk at /vendor/bin (recovery/root/vendor/bin/: qseecomd, keymasterd and
+# bin/hw/ keymaster/gatekeeper HALs); their HIDL libraries are already pulled
+# into the recovery image by bootable/recovery/prebuilt/Android.mk.
 service vendor.qseecomd /vendor/bin/qseecomd
     class core
     user root

@@ -74,6 +74,15 @@ TARGET_USES_MKE2FS := true
 # Encryption
 BOARD_USES_METADATA_PARTITION := true
 BOARD_USES_QCOM_FBE_DECRYPTION := true
+# Far-future patch level + version, observed to take effect in the TWRP-16
+# build of this tree (log/recovery.log shows ro.build.version.security_patch
+# = 2099-12-31 and ro.build.version.release = 99.87.36). These are build-time
+# props used to satisfy the Keymaster patch-level comparison during FBE
+# metadata decryption (README 5.2); they are NOT the device's real patch
+# level. VENDOR_SECURITY_PATCH feeds ro.vendor.build.security_patch via
+# build/make/core/sysprop_config.mk. If the upstream manifest/branch changes,
+# re-verify that these assignments still win (upstream AOSP guards
+# PLATFORM_SECURITY_PATCH with ifdef+$(error) in version_util.mk).
 PLATFORM_VERSION := 99.87.36
 PLATFORM_VERSION_LAST_STABLE := $(PLATFORM_VERSION)
 PLATFORM_SECURITY_PATCH := 2099-12-31

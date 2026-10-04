@@ -11,3 +11,13 @@
 # The kernel payload is named exactly "Image" (no extension), so text=auto cannot
 # classify it by suffix; mark the path explicitly.
 prebuilt/Image binary
+
+# The split-MBN TrustZone images (.mdt/.b00..b07) carry no recognised binary
+# suffix either, and text=auto would otherwise inspect them file by file. They
+# sit in the recovery ramdisk at /vendor/firmware_mnt/image and are loaded
+# verbatim by QSEECom, so pin the whole directory.
+recovery/root/vendor/firmware_mnt/image/** binary
+
+# Same for the recovery vendor executables: qseecomd, keymasterd and the
+# keymaster/gatekeeper HALs under bin/hw have no extension at all.
+recovery/root/vendor/bin/** binary

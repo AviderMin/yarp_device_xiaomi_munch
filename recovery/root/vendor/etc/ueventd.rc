@@ -1,5 +1,12 @@
 # Recovery ueventd rules for the Qualcomm secure stack.
 #
+# ueventd's entry chain in this recovery: it parses /system/etc/ueventd.rc
+# (provided by the build system, not this device tree) and imports
+# /vendor/etc/ueventd.rc plus /odm/etc/ueventd.rc from there (observed in
+# log/logcat.txt). This file is the ONLY ueventd config the device tree
+# contributes; a ramdisk-root /ueventd.rc would never be parsed (ueventd has
+# no such entry point) and was removed as dead config.
+#
 # QSEECom_start_app() loads the keymaster/gatekeeper TrustZone apps
 # (keym2p.mdt, ...) with request_firmware(). The kernel firmware loader then
 # asks ueventd, which searches the directories listed here in addition to the
