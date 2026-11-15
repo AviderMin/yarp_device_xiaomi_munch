@@ -55,10 +55,13 @@ git clone https://github.com/AviderMin/yarp_device_xiaomi_munch.git device/xiaom
 export ALLOW_MISSING_DEPENDENCIES=true
 . build/envsetup.sh
 lunch twrp_munch
-mka bootimage
+mka bootimage vendorbootimage
 ```
 
-产物：`out/target/product/munch/boot.img`。
+产物：`out/target/product/munch/boot.img`、`out/target/product/munch/vendor_boot.img`。
+
+> **为什么还要 `vendor_boot.img`**：`boot.img` 里只有内核和 recovery ramdisk；本机 `vendor_boot` 分区还需要配套的 stock munch vendor_boot（vendor ramdisk 仅 2.3 KB，带 stock DTB）。设备树已把 stock `vendor_boot` 作为 `prebuilt/vendor_boot.img` 预置，`mka vendorbootimage` 会把它打成可刷写的 `vendor_boot.img`。
+> 2026-11-15 真机实测：本机 `vendor_boot_b` 被 LineageOS 16 替换成了 19,066,379 B 的完整 Android ramdisk（`ro.build.flavor=lineage_munch-userdebug`），它与 stock-kernel 的 YARP `boot.img` 不配套；只刷 `boot_b` 会卡在启动阶段、USB 不枚举，随后 ABL 把 slot b 标记为 unbootable。只刷 `boot_a` 到 `vendor_boot_a` 保持 stock 的 slot A 时 YARP 可正常启动并完成 FBE 解密。
 
 * lunch 目标来自 `AndroidProducts.mk` 的 `COMMON_LUNCH_CHOICES := twrp_munch-eng`，产品名来自 `twrp_munch.mk` 的 `PRODUCT_NAME := twrp_munch`。
 * `ALLOW_MISSING_DEPENDENCIES=true` 在 `BoardConfig.mk:11` 里也设了一份，避免用最小清单构建时缺件报错。
@@ -67,11 +70,14 @@ mka bootimage
 
 ```bash
 fastboot flash boot out/target/product/munch/boot.img
+fastboot flash vendor_boot out/target/product/munch/vendor_boot.img
 ```
 
 本机**没有 recovery 分区**：`device.mk` 的 A/B 节打开 `BOARD_USES_RECOVERY_AS_BOOT := true`，AOSP 因此把 `INSTALLED_RECOVERYIMAGE_TARGET` 置空（`build/make/core/Makefile` 的 recovery-as-boot 分支），**不会**产出 `recovery.img`；TWRP 的 recovery 资源被打进 boot 镜像，所以刷的是 `boot` 分区。
 
-> 从别的 recovery 切过来时注意 A/B 槽位：`fastboot --set-active=a|b` 要与刷入的槽位一致。本机实测 `ro.boot.slot_suffix` 为 `_a`。
+> **`vendor_boot` 必须和 `boot` 一起刷**：`vendor_boot` 分区里是配套的 stock vendor ramdisk（仅 2.3 KB 的 fstab + stock DTB）。如果目标槽的 `vendor_boot` 已被其他 ROM 换成完整 Android ramdisk（例如 LineageOS 16 的 19,066,379 B `lineage_munch-userdebug` 版本），只刷 `boot` 会卡在启动阶段、USB 不枚举，随后 ABL 把该槽标记为 `unbootable`。
+
+> 从别的 recovery 切过来时注意 A/B 槽位：`fastboot --set-active=a|b` 要与刷入的槽位一致。本机 2026-11-15 实测 active slot 是 `_b`（不是 `_a`）；把 stock `boot.img` + `vendor_boot.img` 刷到非当前槽（如 `a`）不影响另一个槽里的 Android。
 
 ---
 
@@ -85,6 +91,7 @@ AndroidProducts.mk          注册 PRODUCT_MAKEFILES 与 COMMON_LUNCH_CHOICES
 Android.mk                  子目录 makefile 入口
 system.prop                 ro.adb.secure=0 / ro.boot.dynamic_partitions / gatekeeper.disable_spu
 prebuilt/Image              预编译内核（TARGET_PREBUILT_KERNEL 指向这里）
+prebuilt/vendor_boot.img    stock munch vendor_boot 原始镜像（1,622,016 B；构建时 avbtool 补到 96 MiB 分区）
 recovery/root/              recovery ramdisk 覆盖层（被原样打包进 ramdisk），共 76 个文件
 ├── init.recovery.qcom.rc       核心 init rc：挂载链、QTI 安全服务、属性门
 ├── init.recovery.usb.rc        USB gadget / adb / fastbootd / MTP（98 行）
@@ -130,6 +137,7 @@ log/                        调试日志（dmesg.log / logcat.txt / recovery.log
 * ⚠️ **不要在 `BoardConfig.mk` 里定义 `BOARD_BOOT_HEADER_VERSION`**：任何 ≥3 的值都会让 AOSP 置 `BUILDING_VENDOR_BOOT_IMAGE := true`（`build/make/core/board_config.mk` 的对应判定），把内核 cmdline 从 boot.img 挪走，TWRP 的 `twrpfastboot=1`（`vendor/twrp/config/BoardConfigTWRP.mk`）就落不进任何镜像。这条警告在 `BoardConfig.mk` 内核段的 NOTE 注释里有完整说明。
 * 内核走预编译路线：`BOARD_KERNEL_IMAGE_NAME := Image` + `TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/Image`（`BoardConfig.mk:35-38`），不编译 `kernel/xiaomi/munch`。
 * `BOARD_KERNEL_CMDLINE` 为空，设备特有的 cmdline 由 TWRP 自己追加。
+* `vendor_boot` 是独立的镜像：stock munch 的 vendor ramdisk 只有 `first_stage_ramdisk/fstab.qcom`（压缩后 2,347 B），DTB 1,613,352 B。`boot.img` 不包含它，必须与配对的 `vendor_boot.img` 一起刷。设备树通过 `BOARD_PREBUILT_VENDOR_BOOTIMAGE := $(DEVICE_PATH)/prebuilt/vendor_boot.img` 和 `BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE := 100663296` 让 `mka vendorbootimage` 输出 stock vendor_boot；详见 3.2 的实测边界。
 
 ### 5.2 FBE 元数据解密（本树最重要的一处修复）
 
@@ -344,6 +352,7 @@ mount vfat /dev/block/bootdevice/by-name/modem${ro.boot.slot_suffix} /firmware r
 | `Unable to decrypt metadata encryption` | key blob 的 OS/VENDOR patchlevel 与属性不匹配，TA 升级失败（-62 / -38） | `BoardConfig.mk` Encryption 节 | 历史日志实测通过（快照证据，见 5.2） |
 | 设置重启后丢失 / `Unable to find partition for path /mnt/vendor/persist/TWRP` | persist 分区没挂，`TW_PERSIST_DIR` 解析不到分区 | `init.recovery.qcom.rc` `on fs` persist 段 | 已修；历史快照日志里设置从 `/mnt/vendor/persist/TWRP/.twrp_settings` 正常加载 |
 | `/firmware` 挂不上；开机白等一整个超时；qseecomd/TWRP 启动被推迟到 boot 32 s | 等的 `by-name/modem` 不是真实节点（真名 `modem_a`），TWRP 自建的链接来得太晚，且 init action 串行 | `init.recovery.qcom.rc` `on fs` modem 段 + `twrp.flags` `/firmware` 补 `slotselect` | 已修；历史快照日志里 qseecomd 约 2.7 s 启动、`/firmware` 正常挂载 |
+| 只刷 `boot` 后开机卡死、USB 不枚举，ABL 把槽标记 `unbootable` | 目标槽的 `vendor_boot` 是其他 ROM 的完整 Android ramdisk，与 stock-kernel 的 `boot.img` 不配套 | `BoardConfig.mk` Vendor boot 节 + `prebuilt/vendor_boot.img`；刷写时同时刷 `vendor_boot` | 2026-11-15 真机实测：slot B 同时刷入后 YARP 正常启动、FBE 解密成功 |
 | `/usb_otg` 挂载失败，`Size: 0 B`，`request_module fs-auto` | fstype `auto` 在无介质时直达 `mount(2)` | `twrp.flags` `/usb_otg`（auto → vfat） | 已改，需真实 U 盘验证（至今无介质现场） |
 | `fail to load lib : /vendor/lib64/vendor.awa.wavelib.so`，HAL 每 5 s SIGABRT | ramdisk 缺该库 | 新增 `recovery/root/vendor/lib64/vendor.awa.wavelib.so` | 库仍在，消费者已删除（见 5.8） |
 | HAL `RefBase: incStrongRequireStrong()` abort | 旧 HAL 的 Thread 裸指针所有权与 Android 16 libutils 不兼容 | 曾用 `vibrator/ThreadCompat.cpp` + 专用 `LD_PRELOAD` 缓解 | **随 HAL 一并移除**（5.8） |
@@ -391,6 +400,11 @@ adb shell service list | grep -E 'keymaster|gatekeeper'  # 期望两个 HIDL 服
 ls -l out/target/product/munch/boot.img
 unpack_bootimg --boot_img out/target/product/munch/boot.img --header_version 3 --out /tmp/boot
 grep -a twrpfastboot /tmp/boot/kernel_cmdline.txt        # 期望能搜到 twrpfastboot=1
+
+# vendor_boot.img 存在，且 vendor ramdisk 与 stock 基线一致
+ls -l out/target/product/munch/vendor_boot.img
+unpack_bootimg --boot_img out/target/product/munch/vendor_boot.img --out /tmp/vendor_boot
+file /tmp/vendor_boot/vendor_ramdisk                      # gzip，解压后只有 first_stage_ramdisk/fstab.qcom
 ```
 
 ### 8.3 触摸固件一致性校验（换内核后必做）
@@ -434,6 +448,7 @@ PY
 | 不要伪造 / 随便替换 `focaltech_ts_fw.bin` | 它是真实的分段固件格式，会被真的写进面板；必须与内核内嵌固件一致（见 5.6、8.3） |
 | 不要给 recovery 新增服务时忘了 `disabled` + 属性门 | `on boot` 的 `class_start hal` 只跳过显式 `disabled` 的服务（`system/core/init/builtins.cpp` 的 class_start 实现），否则会在 QSEE 就绪前崩溃重启 |
 | 不要在 `on fs` 里等非 slotselect 的裸节点名 | 见 5.5：`by-name/modem` 是 TWRP 事后创建的，等它只会白等并把整条 init 链堵死 |
+| 不要只刷 `boot.img` 而不刷配套的 `vendor_boot.img` | 目标槽的 `vendor_boot` 可能已被 LineageOS 等 ROM 替换；不匹配会卡死在启动阶段，ABL 随后把该槽标记 `unbootable`（见 3.2、5.1） |
 | 新增 `.so` / 固件 / HAL 二进制后不要忘记 `git add` | 它们不是编译产物，漏提交会让新克隆的构建缺件 |
 
 ---

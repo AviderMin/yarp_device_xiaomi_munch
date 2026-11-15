@@ -49,6 +49,17 @@ BOARD_KERNEL_CMDLINE :=
 # TARGET_KERNEL_CONFIG := munch_defconfig
 BOARD_MKBOOTIMG_ARGS += --header_version 3
 
+# Vendor boot
+# boot.img carries only the kernel + recovery ramdisk. The vendor_boot partition
+# must carry the matching stock munch vendor_boot (the small fstab-only vendor
+# ramdisk and the stock DTB). A custom ROM can leave a full Android vendor
+# ramdisk there; pairing that with this boot.img makes the kernel hang before USB
+# comes up and ABL then marks the slot unbootable (observed on the real device).
+# Ship the stock vendor_boot as a prebuilt so 'mka vendorbootimage' emits a
+# matching image that can be flashed alongside boot.img.
+BOARD_PREBUILT_VENDOR_BOOTIMAGE := $(DEVICE_PATH)/prebuilt/vendor_boot.img
+BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE := 100663296
+
 # AVB
 BOARD_AVB_ENABLE := true
 
